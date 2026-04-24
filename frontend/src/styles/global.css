@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Playfair+Display:wght@700;800;900&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Brand Colors — inspired by MHA purple/blue logo */
+  --primary:      #4F46E5;
+  --primary-dark: #3730A3;
+  --primary-lt:   #EEF2FF;
+  --primary-mid:  #6366F1;
+  --secondary:    #7C3AED;
+  --accent:       #F59E0B;
+  --accent-lt:    #FEF3C7;
+
+  /* Neutrals */
+  --bg:        #F8F7FF;
+  --bg-2:      #F1F0FA;
+  --surface:   #FFFFFF;
+  --surface-2: #F9F8FF;
+  --border:    #E5E3F5;
+  --border-2:  #C7C5E0;
+
+  /* Text */
+  --text-1:   #1E1B4B;
+  --text-2:   #4B4880;
+  --text-3:   #9490C0;
+
+  /* Semantics */
+  --success:  #059669;
+  --error:    #DC2626;
+  --warn:     #D97706;
+  --info:     #0284C7;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(79,70,229,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(79,70,229,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 40px rgba(79,70,229,0.15), 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-xl: 0 24px 60px rgba(79,70,229,0.18), 0 8px 24px rgba(0,0,0,0.1);
+
+  /* Radii */
+  --r:    8px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-2xl:28px;
+
+  /* Fonts */
+  --font:  'Inter', system-ui, sans-serif;
+  --serif: 'Playfair Display', Georgia, serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-2); }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+/* Animations */
+@keyframes fadeUp   { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+@keyframes fadeIn   { from { opacity:0; } to { opacity:1; } }
+@keyframes spin     { to { transform:rotate(360deg); } }
+@keyframes pulse    { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+@keyframes shimmer  { 0% { background-position:-200% 0; } 100% { background-position:200% 0; } }
+@keyframes slideIn  { from { transform:translateX(100%); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes bounce   { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-6px); } }
