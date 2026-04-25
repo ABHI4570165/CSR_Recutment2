@@ -6,39 +6,52 @@ import "./RegisterPage.css";
 export default function RegisterPage() {
   const navigate  = useNavigate();
   const location  = useLocation();
-  const [form,     setForm]     = useState({ name:"", email:"", college:"", rollNo:"", phone:"" });
+
+  const [form, setForm] = useState({
+    name:    "",
+    email:   "",
+    college: "",
+    rollNo:  "",
+    phone:   "",
+  });
   const [errors,   setErrors]   = useState({});
   const [loading,  setLoading]  = useState(false);
   const [success,  setSuccess]  = useState(false);
   const [apiErr,   setApiErr]   = useState("");
   const [checking, setChecking] = useState(true);
 
-  // If already has token → verify and redirect
+  // ── Auto-redirect if already logged in ─────────────────────────────────────
   useEffect(() => {
     const token = localStorage.getItem("quizToken");
     if (!token) { setChecking(false); return; }
     verifyToken()
-      .then(res => {
+      .then((res) => {
         const user = res?.data?.data || {};
         navigate("/ready", { state: { user, token }, replace: true });
       })
-      .catch(() => { localStorage.removeItem("quizToken"); setChecking(false); });
+      .catch(() => {
+        localStorage.removeItem("quizToken");
+        setChecking(false);
+      });
   }, []);
 
-  // Token in URL query (legacy fallback)
+  // ── Token in URL (e.g. from email link — legacy) ────────────────────────────
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const t = params.get("token");
+    const t = new URLSearchParams(location.search).get("token");
     if (!t) return;
     localStorage.setItem("quizToken", t);
     verifyToken()
-      .then(res => {
+      .then((res) => {
         const user = res?.data?.data || {};
         navigate("/ready", { state: { user, token: t }, replace: true });
       })
-      .catch(() => { localStorage.removeItem("quizToken"); setChecking(false); });
+      .catch(() => {
+        localStorage.removeItem("quizToken");
+        setChecking(false);
+      });
   }, [location.search]);
 
+  // ── Client-side validation ──────────────────────────────────────────────────
   const validate = () => {
     const e = {};
     if (!form.name.trim())    e.name    = "Name is required";
@@ -47,62 +60,90 @@ export default function RegisterPage() {
     if (!form.college.trim()) e.college = "College / institution is required";
     if (!form.rollNo.trim())  e.rollNo  = "Roll number is required";
     if (!form.phone.trim())   e.phone   = "Phone number is required";
-    else if (!/^\d{10}$/.test(form.phone.replace(/\s|-/g,""))) e.phone = "Enter valid 10-digit number";
+    else if (!/^\d{10}$/.test(form.phone.replace(/[\s-]/g, "")))
+      e.phone = "Enter a valid 10-digit number";
     return e;
   };
 
+  // ── Submit ──────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     const v = validate();
     if (Object.keys(v).length) { setErrors(v); return; }
-    setErrors({}); setApiErr(""); setLoading(true);
-    try {
-      const res = await register(form);
 
-      // Defensive: handle any response shape so we never crash with
-      // "Cannot destructure property 'token' of undefined"
+    setErrors({});
+    setApiErr("");
+    setLoading(true);
+
+    try {
+      const res = await register(form); // api.js builds the exact body
+
+      // Defensive: accept token from multiple response shapes
+      // backend now returns token at BOTH res.data.token AND res.data.data.token
       const payload = res?.data?.data || res?.data || {};
-      const token   = payload.token   || null;
-      const name    = payload.name    || form.name.trim();
-      const email   = payload.email   || form.email.trim();
+      const token   = res?.data?.token || payload?.token || null;
+      const name    = res?.data?.user?.name  || payload?.name  || form.name.trim();
+      const email   = res?.data?.user?.email || payload?.email || form.email.trim();
 
       if (!token) {
-        // Backend returned success:true but no token — show clear message
-        setApiErr("Registration succeeded but no token was returned. Check backend JWT_SECRET env variable on Render.");
+        // Backend responded 2xx but no token — config issue on Render
+        setApiErr(
+          "Server returned no token. Verify JWT_SECRET is set in Render environment variables. " +
+          `Response: ${JSON.stringify(res?.data)}`
+        );
         return;
       }
 
       localStorage.setItem("quizToken", token);
       setSuccess(true);
+
       setTimeout(() => {
         navigate("/ready", {
           state: {
-            user: { name, email, college: form.college, rollNo: form.rollNo },
             token,
+            user: {
+              name,
+              email,
+              college: form.college.trim(),
+              rollNo:  form.rollNo.trim().toUpperCase(),
+            },
           },
         });
       }, 1200);
     } catch (err) {
+      // err.message is normalised in api.js interceptor and includes
+      // the exact missing fields from the backend response
       setApiErr(err.message || "Registration failed. Please try again.");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const inp = (key, label, type="text", ph="") => (
+  // ── Field helper ────────────────────────────────────────────────────────────
+  const inp = (key, label, type = "text", ph = "") => (
     <div className="rp-field" key={key}>
       <label className="rp-label">{label}</label>
-      <input type={type} className={`rp-input ${errors[key]?"rp-input--err":""}`}
-        placeholder={ph || label} value={form[key]}
-        onChange={e => { setForm(f=>({...f,[key]:e.target.value})); setErrors(er=>({...er,[key]:""})); setApiErr(""); }}
-        autoComplete="off"/>
+      <input
+        type={type}
+        className={`rp-input ${errors[key] ? "rp-input--err" : ""}`}
+        placeholder={ph || label}
+        value={form[key]}
+        onChange={(ev) => {
+          setForm((f) => ({ ...f, [key]: ev.target.value }));
+          setErrors((er) => ({ ...er, [key]: "" }));
+          setApiErr("");
+        }}
+        autoComplete="off"
+      />
       {errors[key] && <span className="rp-field-err">⚠ {errors[key]}</span>}
     </div>
   );
 
-  if (checking) return <div className="rp-fullcenter"><div className="rp-spinner"/></div>;
+  if (checking) return <div className="rp-fullcenter"><div className="rp-spinner" /></div>;
 
   return (
     <div className="rp-root">
-      {/* Left panel */}
+      {/* ── Left branding panel ── */}
       <div className="rp-left">
         <div className="rp-left-inner">
           <div className="rp-brand">
@@ -112,15 +153,20 @@ export default function RegisterPage() {
               <div className="rp-brand-sub">Mandi Harish Foundation®</div>
             </div>
           </div>
-          <h1 className="rp-hero-title">Online Assessment<br/><span>Platform</span></h1>
-          <p className="rp-hero-sub">Test your skills in Aptitude, Logical Reasoning &amp; English in a secure, fullscreen, timed environment.</p>
+          <h1 className="rp-hero-title">
+            Online Assessment<br /><span>Platform</span>
+          </h1>
+          <p className="rp-hero-sub">
+            Test your skills in Aptitude, Logical Reasoning &amp; English in a
+            secure, fullscreen, timed environment.
+          </p>
           <div className="rp-features">
             {[
-              {icon:"📋", t:"3 Sections",       d:"Aptitude · Logical · English"},
-              {icon:"⏱",  t:"Timed Quiz",        d:"Server-enforced time limit"},
-              {icon:"🖥️", t:"Fullscreen Mode",   d:"Anti-malpractice monitoring"},
-              {icon:"📊", t:"Official Results",  d:"Announced via MHA channels"},
-            ].map(f=>(
+              { icon: "📋", t: "3 Sections",      d: "Aptitude · Logical · English" },
+              { icon: "⏱",  t: "Timed Quiz",       d: "Server-enforced time limit"   },
+              { icon: "🖥️", t: "Fullscreen Mode",  d: "Anti-malpractice monitoring"  },
+              { icon: "📊", t: "Official Results", d: "Announced via MHA channels"   },
+            ].map((f) => (
               <div key={f.t} className="rp-feat">
                 <div className="rp-feat-icon">{f.icon}</div>
                 <div>
@@ -131,19 +177,21 @@ export default function RegisterPage() {
             ))}
           </div>
           <div className="rp-deco-circles">
-            <div className="rp-circle rp-circle-1"/>
-            <div className="rp-circle rp-circle-2"/>
-            <div className="rp-circle rp-circle-3"/>
+            <div className="rp-circle rp-circle-1" />
+            <div className="rp-circle rp-circle-2" />
+            <div className="rp-circle rp-circle-3" />
           </div>
         </div>
       </div>
 
-      {/* Right panel */}
+      {/* ── Right form panel ── */}
       <div className="rp-right">
         <div className="rp-form-card">
           <div className="rp-form-head">
             <h2 className="rp-form-title">Register &amp; Start Quiz</h2>
-            <p className="rp-form-sub">Fill in your details to begin the assessment immediately.</p>
+            <p className="rp-form-sub">
+              Fill in your details to begin the assessment immediately.
+            </p>
           </div>
 
           {success ? (
@@ -151,7 +199,9 @@ export default function RegisterPage() {
               <div className="rp-success-check">✓</div>
               <h3>Registration Successful!</h3>
               <p>Redirecting you to the quiz…</p>
-              <div className="rp-progress"><div className="rp-progress-fill"/></div>
+              <div className="rp-progress">
+                <div className="rp-progress-fill" />
+              </div>
             </div>
           ) : (
             <form className="rp-form" onSubmit={handleSubmit} noValidate>
@@ -162,14 +212,23 @@ export default function RegisterPage() {
                 {inp("rollNo",  "Roll Number",           "text",  "Your roll / registration number")}
                 {inp("phone",   "Phone Number",          "tel",   "10-digit mobile number")}
               </div>
-              {apiErr && <div className="rp-api-err"><span>⚠</span>{apiErr}</div>}
+
+              {apiErr && (
+                <div className="rp-api-err">
+                  <span>⚠</span>
+                  <span>{apiErr}</span>
+                </div>
+              )}
+
               <button className="rp-submit" type="submit" disabled={loading}>
                 {loading
-                  ? <><span className="rp-spin"/><span>Registering…</span></>
+                  ? <><span className="rp-spin" /><span>Registering…</span></>
                   : <>Register &amp; Start Quiz →</>
                 }
               </button>
-              <p className="rp-note">You will be taken directly to the quiz after registration.</p>
+              <p className="rp-note">
+                You will be taken directly to the quiz after registration.
+              </p>
             </form>
           )}
         </div>
