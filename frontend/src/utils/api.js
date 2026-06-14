@@ -105,9 +105,32 @@ export const fetchSections   = ()     => adminApi.get("/admin/sections");
 export const addSection      = (d)    => adminApi.post("/admin/sections", d);
 export const deleteSection   = (name) => adminApi.delete(`/admin/sections/${name}`);
 export const fetchCutoff     = (p)    => adminApi.get("/admin/cutoff",   { params: p });
+export const testEmail       = (to)   => adminApi.post("/admin/test-email", { to });
 
 // ── Question APIs ─────────────────────────────────────────────────────────────
 export const fetchQuestions = (p)    => adminApi.get("/questions",        { params: p });
 export const addQuestion    = (d)    => adminApi.post("/questions", d);
 export const updateQuestion = (id,d) => adminApi.put(`/questions/${id}`, d);
 export const deleteQuestion = (id)   => adminApi.delete(`/questions/${id}`);
+
+// ── Campus Recruitment — Admin (assessments / drives + candidates) ─────────────
+export const fetchAssessments     = ()      => adminApi.get("/assessments");
+export const createAssessment     = (d)     => adminApi.post("/assessments", d);
+export const updateAssessment     = (id,d)  => adminApi.put(`/assessments/${id}`, d);
+export const deleteAssessment     = (id,f)  => adminApi.delete(`/assessments/${id}${f?"?force=true":""}`);
+export const uploadCandidates     = (d)     => adminApi.post("/assessments/candidates", d);
+export const scheduleInvites      = (d)     => adminApi.post("/assessments/schedule", d);
+export const fetchCandidates      = (p)     => adminApi.get("/assessments/candidates", { params: p });
+export const fetchCandidateStats  = (p)     => adminApi.get("/assessments/candidate-stats", { params: p });
+export const fetchDriveColleges   = (p)     => adminApi.get("/assessments/colleges", { params: p });
+export const setCandidateStatus   = (d)     => adminApi.patch("/assessments/candidates/status", d);
+export const deleteCandidate      = (id)    => adminApi.delete(`/assessments/candidates/${id}`);
+
+// ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────
+// No auth header — the opaque token IS the credential.
+const candApi = axios.create({ baseURL: BASE, timeout: 30000, headers: { "Content-Type": "application/json" } });
+candApi.interceptors.response.use((r) => r, handleErr);
+export const getCandidate    = (token)    => candApi.get(`/candidate/${token}`);
+export const startCandidate  = (token)    => candApi.post(`/candidate/${token}/start`);
+export const saveCandidate   = (token, d) => candApi.post(`/candidate/${token}/save`, d);
+export const submitCandidate = (token, d) => candApi.post(`/candidate/${token}/submit`, d);

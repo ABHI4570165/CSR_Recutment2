@@ -3,7 +3,7 @@ const {
   getStats, getUsers, getUserDetail, deleteUser, getAttempts,
   getSettings, updateSettings,
   getSections, addSection, deleteSection,
-  getCutoffPreview
+  getCutoffPreview, testEmail
 } = require("../controllers/adminController");
 const { authAdmin } = require("../middleware/auth");
 
@@ -18,5 +18,6 @@ router.get   ("/sections",        authAdmin, getSections);
 router.post  ("/sections",        authAdmin, addSection);
 router.delete("/sections/:name",  authAdmin, deleteSection);
 router.get   ("/cutoff",          authAdmin, getCutoffPreview);
+router.post  ("/test-email",      authAdmin, testEmail);
 
 module.exports = router;

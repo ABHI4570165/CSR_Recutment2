@@ -8,6 +8,11 @@ frontend/.env.production
 
 # Environment secrets — NEVER commit these
 backend/.env
+# Local dev frontend env (localhost) — must NOT override Vercel/Hostinger build config
+frontend/.env
+
+# Claude Code local project data (memory, sessions)
+.claude/
 
 # OS files
 .DS_Store

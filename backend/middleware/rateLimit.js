@@ -27,4 +27,15 @@ const submitLimiter = rateLimit({
   message: { success: false, message: "Too many submission attempts." },
 });
 
-module.exports = { apiLimiter, authLimiter, submitLimiter };
+// Candidate (token-based) endpoints — generous, keyed by token so one candidate's
+// retries can't lock out others sharing an IP (e.g. a campus lab / NAT).
+const candidateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.params?.token || req.ip,
+  message: { success: false, message: "Too many requests. Please slow down." },
+});
+
+module.exports = { apiLimiter, authLimiter, submitLimiter, candidateLimiter };

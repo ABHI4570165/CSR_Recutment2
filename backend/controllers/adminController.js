@@ -42,7 +42,7 @@ exports.getStats = async (req, res) => {
 exports.getUsers = async (req, res) => {
   try {
     const page    = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit   = Math.min(50, parseInt(req.query.limit) || 15);
+    const limit   = Math.min(500, parseInt(req.query.limit) || 15);
     const search  = (req.query.search || "").trim();
     const minScore = req.query.minScore ? parseInt(req.query.minScore) : null;
     const status   = req.query.status || "";
@@ -104,7 +104,7 @@ exports.deleteUser = async (req, res) => {
 exports.getAttempts = async (req, res) => {
   try {
     const page   = Math.max(1, parseInt(req.query.page) || 1);
-    const limit  = Math.min(50, parseInt(req.query.limit) || 15);
+    const limit  = Math.min(500, parseInt(req.query.limit) || 15);
     const search = (req.query.search || "").trim();
     const status = req.query.status || "";
     const passed = req.query.passed;
@@ -239,6 +239,40 @@ exports.deleteSection = async (req, res) => {
   }
 };
 
+// ── Email diagnostics + test send (temporary admin tool) ───────────────────────
+exports.testEmail = async (req, res) => {
+  const { emailDiag, emailConfigured, verifyTransport, sendMail } = require("../utils/email");
+  const to = (req.body?.to || "").trim();
+  const diag = emailDiag();
+  console.log("[testEmail] requested →", to, "| diag:", JSON.stringify(diag));
+  if (!emailConfigured()) {
+    return res.status(400).json({ success: false, step: "config",
+      message: "Email NOT configured (EMAIL_USER/EMAIL_PASS missing in the running process). Set them and restart the backend.", diag });
+  }
+  const verify = await verifyTransport();
+  if (!verify.ok) {
+    return res.status(502).json({ success: false, step: "smtp-auth",
+      message: `SMTP authentication failed: ${verify.error}`, diag, error: verify.error });
+  }
+  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+    return res.json({ success: true, step: "verify-only", smtpAuth: "ok", diag,
+      message: "SMTP authentication succeeded. Provide a valid 'to' address to send a real test email." });
+  }
+  try {
+    const messageId = await sendMail({
+      to,
+      subject: "MH Academy — SMTP Test ✅",
+      html: `<div style="font-family:Arial;padding:20px"><h2>SMTP test successful</h2><p>If you received this, your MH Academy email pipeline is working.</p></div>`,
+      text: "SMTP test successful — your MH Academy email pipeline is working.",
+    });
+    console.log(`[testEmail] ✔ sent to ${to} (messageId: ${messageId})`);
+    res.json({ success: true, step: "sent", smtpAuth: "ok", messageId, diag, message: `Test email sent to ${to}.` });
+  } catch (err) {
+    console.error("[testEmail] send failed:", err.message);
+    res.status(502).json({ success: false, step: "send", message: `Send failed: ${err.message}`, error: err.message, diag });
+  }
+};
+
 // ── Cutoff Preview ─────────────────────────────────────────────────────────────
 exports.getCutoffPreview = async (req, res) => {
   try {
@@ -247,7 +281,7 @@ exports.getCutoffPreview = async (req, res) => {
       return res.status(400).json({ success:false, message:"Invalid cutoff value." });
     }
     const page  = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(200, parseInt(req.query.limit) || 50);
+    const limit = Math.min(100000, parseInt(req.query.limit) || 500);
     const filter = { quizCompleted:true, score:{ $gte:cutoff } };
     const [users, total, topDoc] = await Promise.all([
       User.find(filter)

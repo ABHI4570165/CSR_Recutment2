@@ -9,6 +9,11 @@ const { createClient } = require("./utils/redis");
 
 const app = express();
 
+// Render / Hostinger / nginx terminate TLS and forward via a reverse proxy.
+// Without this, req.ip is the proxy address (breaks IP rate-limiting) and
+// express-rate-limit v7 raises ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set("trust proxy", 1);
+
 // ── STEP 1: CORS — must be the VERY FIRST middleware ─────────────────────────
 // express.json() CANNOT run before CORS — a blocked preflight returns no body,
 // which is why req.body appears empty and "All fields are required" fires.
@@ -68,20 +73,28 @@ if (!process.env.MONGO_URI) {
   process.exit(1);
 }
 mongoose.connect(process.env.MONGO_URI, {
-  maxPoolSize:               10,
+  maxPoolSize:               parseInt(process.env.MONGO_POOL_SIZE) || 20,
+  minPoolSize:               parseInt(process.env.MONGO_MIN_POOL)  || 2,
   serverSelectionTimeoutMS:  10000,
   socketTimeoutMS:           45000,
-}).then(() => console.log("✅  MongoDB connected"))
-  .catch((err) => { console.error("❌  MongoDB:", err.message); process.exit(1); });
+}).then(() => {
+  console.log("✅  MongoDB connected");
+  // Start the invitation email scheduler once the DB is ready.
+  try { require("./utils/emailQueue").startScheduler(); }
+  catch (e) { console.warn("Email scheduler not started:", e.message); }
+}).catch((err) => { console.error("❌  MongoDB:", err.message); process.exit(1); });
 
 // ── STEP 5: Redis (optional) ──────────────────────────────────────────────────
 createClient();
 
 // ── STEP 6: Routes ────────────────────────────────────────────────────────────
-app.use("/api/auth",      require("./routes/auth"));
-app.use("/api/quiz",      require("./routes/quiz"));
-app.use("/api/admin",     require("./routes/admin"));
-app.use("/api/questions", require("./routes/questions"));
+app.use("/api/auth",        require("./routes/auth"));
+app.use("/api/quiz",        require("./routes/quiz"));
+app.use("/api/admin",       require("./routes/admin"));
+app.use("/api/questions",   require("./routes/questions"));
+// ── Campus recruitment platform (additive — does not touch legacy routes) ──────
+app.use("/api/assessments", require("./routes/assessments")); // admin: drives + candidates
+app.use("/api/candidate",   require("./routes/candidate"));   // public: token-based flow
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) =>

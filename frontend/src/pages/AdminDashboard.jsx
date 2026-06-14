@@ -3,11 +3,16 @@ import * as XLSX from "xlsx";
 import {
   adminLogin, clearAdminToken, fetchStats, fetchUsers, fetchAttempts,
   fetchSettings, updateSettings, fetchQuestions, addQuestion, updateQuestion,
-  deleteQuestion, deleteUser, fetchCutoff, fetchSections
+  deleteQuestion, deleteUser, fetchCutoff, fetchSections,
+  fetchAssessments, createAssessment, deleteAssessment,
+  uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, testEmail
 } from "../utils/api";
 import "./AdminDashboard.css";
 
 const fmtDate = d => d ? new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}) : "—";
+const fmtDateTime = d => d ? new Date(d).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}) : "—";
+const fmtTimeOnly = d => d ? new Date(d).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) : "—";
 const fmtSecs = s => { if(s==null) return "—"; const m=Math.floor(s/60); return `${m}m ${s%60}s`; };
 
 // Generate a color from a section name (for sections without defined color)
@@ -281,7 +286,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="ad-login-page">
       <div className="ad-login-card">
-        <div className="ad-login-logo">M</div>
+        <div className="ad-login-logo"><img src="/logo.png" alt="MH Academy" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
         <div className="ad-login-brand">Mandi Hariyanna Academy</div>
         <div className="ad-login-sub">Mandi Harish Foundation® · Admin Portal</div>
         <form className="ad-login-form" onSubmit={submit}>
@@ -335,7 +340,7 @@ function CutoffTab() {
     if (isNaN(c)||c<0) { setErr("Please enter a valid cutoff score."); return; }
     setErr(""); setLoading(true);
     try {
-      const res = await fetchCutoff({ cutoff:c, page:pg, limit:50 });
+      const res = await fetchCutoff({ cutoff:c, page:pg, limit:500 });
       setPreview(res.data.data); setPage(pg);
     } catch(e) { setErr(e.message||"Failed to load."); }
     finally { setLoading(false); }
@@ -344,8 +349,28 @@ function CutoffTab() {
   const handleExport = async () => {
     setExporting(true); setConfirming(false);
     try {
-      const res = await fetchCutoff({ cutoff:parseInt(cutoff), page:1, limit:5000 });
-      const rows = res.data.data.users;
+      const cutoffValue = parseInt(cutoff);
+      let allUsers = [];
+      let currentPage = 1;
+      let hasMore = true;
+
+      // Fetch all pages to get all students
+      while (hasMore) {
+        const res = await fetchCutoff({ cutoff:cutoffValue, page:currentPage, limit:100000 });
+        const users = res.data.data.users || [];
+        allUsers = allUsers.concat(users);
+        
+        // Check if there are more pages
+        const total = res.data.data.total || 0;
+        if (allUsers.length >= total) {
+          hasMore = false;
+        } else {
+          currentPage++;
+        }
+      }
+
+      // Format and export to Excel
+      const rows = allUsers;
       const ws = XLSX.utils.json_to_sheet(rows.map((u,i)=>({
         "#":i+1, Name:u.name, Email:u.email, College:u.college,
         "Roll No":u.rollNo, Phone:u.phone, Score:u.score, "Total Marks":u.totalMarks,
@@ -416,7 +441,7 @@ function CutoffTab() {
                         ))}</tbody>
                       </table>
                     </div>
-                    <Pagination pag={{pages:preview.pages,total:preview.total,limit:50}} page={page} setPage={pg=>loadPreview(pg)}/>
+                    <Pagination pag={{pages:preview.pages,total:preview.total,limit:500}} page={page} setPage={pg=>loadPreview(pg)}/>
                   </>
               }
             </div>
@@ -455,9 +480,467 @@ function CutoffTab() {
   );
 }
 
+// ── Campus Drives Tab (invitation-based assessments) ───────────────────────────
+const STATUS_META = [
+  { key:"invited",     label:"Invited",     color:"#64748B" },
+  { key:"email-sent",  label:"Link Sent",   color:"#0891B2" },
+  { key:"in-progress", label:"In Progress", color:"#D97706" },
+  { key:"completed",   label:"Completed",   color:"#059669" },
+  { key:"disqualified",label:"Disqualified",color:"#DC2626" },
+  { key:"shortlisted", label:"Shortlisted", color:"#2563EB" },
+  { key:"rejected",    label:"Rejected",    color:"#991B1B" },
+];
+
+const LINK_SEND_OPTIONS = [
+  { value:"immediately", label:"Send Immediately" },
+  { value:"15min",       label:"15 Minutes Before Start" },
+  { value:"30min",       label:"30 Minutes Before Start" },
+  { value:"1hour",       label:"1 Hour Before Start" },
+  { value:"2hours",      label:"2 Hours Before Start" },
+  { value:"custom",      label:"Custom Date & Time" },
+];
+
+// Combine a yyyy-mm-dd date input and HH:MM time input into an ISO datetime.
+function combineDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return undefined;
+  const dt = new Date(`${dateStr}T${timeStr}`);
+  return isNaN(dt) ? undefined : dt.toISOString();
+}
+
+function toLocalInput(d){ if(!d) return ""; const dt=new Date(d); const p=n=>String(n).padStart(2,"0"); return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`; }
+
+function CreateDriveModal({ sections, onClose, onCreated }) {
+  const [name,setName]=useState("");
+  const [duration,setDuration]=useState(40);
+  const [passing,setPassing]=useState(30);
+  const [date,setDate]=useState("");
+  const [startTime,setStartTime]=useState("10:00");
+  const [endTime,setEndTime]=useState("13:00");
+  const [linkSendOption,setLinkSendOption]=useState("30min");
+  const [linkSendCustom,setLinkSendCustom]=useState("");
+  const [secs,setSecs]=useState(()=>(sections||[]).map(s=>({...s,include:true})));
+  const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
+
+  const save=async()=>{
+    if(!name.trim()){ setErr("Drive name is required."); return; }
+    const chosen=secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
+    if(!chosen.length){ setErr("Select at least one section."); return; }
+    if(!date){ setErr("Assessment date is required."); return; }
+    const startAt=combineDateTime(date,startTime);
+    const endAt=combineDateTime(date,endTime);
+    if(!startAt||!endAt){ setErr("Valid start and end times are required."); return; }
+    if(new Date(endAt)<=new Date(startAt)){ setErr("End time must be after start time."); return; }
+    if(linkSendOption==="custom" && !linkSendCustom){ setErr("Pick a custom link send date & time."); return; }
+    setSaving(true); setErr("");
+    try{
+      await createAssessment({
+        name:name.trim(), durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
+        assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
+        deadline:endAt, // link expiry defaults to the window end
+        linkSendOption,
+        linkSendAt: linkSendOption==="custom" ? new Date(linkSendCustom).toISOString() : undefined,
+      });
+      onCreated();
+    }catch(e){ setErr(e.message||"Failed to create."); }
+    finally{ setSaving(false); }
+  };
+
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <div className="ad-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:560,maxHeight:"88vh",overflowY:"auto"}}>
+        <h3 className="ad-modal-title">New Campus Drive</h3>
+        <div className="ad-field"><label className="ad-label">Drive / Assessment Name</label>
+          <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
+        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Duration (min)</label>
+            <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
+          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Passing Score (internal)</label>
+            <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <div className="ad-field" style={{flex:1,minWidth:140}}><label className="ad-label">Assessment Date</label>
+            <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
+          <div className="ad-field" style={{width:120}}><label className="ad-label">Start Time</label>
+            <input type="time" className="ad-input" value={startTime} onChange={e=>setStartTime(e.target.value)}/></div>
+          <div className="ad-field" style={{width:120}}><label className="ad-label">End Time</label>
+            <input type="time" className="ad-input" value={endTime} onChange={e=>setEndTime(e.target.value)}/></div>
+        </div>
+        <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Assessment Link Send Time</label>
+          <select className="ad-input ad-select" value={linkSendOption} onChange={e=>setLinkSendOption(e.target.value)}>
+            {LINK_SEND_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {linkSendOption==="custom"
+            ? <input type="datetime-local" className="ad-input" style={{marginTop:8}} value={linkSendCustom} onChange={e=>setLinkSendCustom(e.target.value)}/>
+            : <span className="ad-hint">Shortlist email sends immediately on upload. The assessment link sends {linkSendOption==="immediately"?"immediately":`${LINK_SEND_OPTIONS.find(o=>o.value===linkSendOption)?.label.toLowerCase()}`}.</span>}
+        </div>
+        <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Sections (drawn from the shared question pool)</label>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4}}>
+            {secs.map((s,i)=>(
+              <div key={s.name} style={{display:"flex",alignItems:"center",gap:10,background:"#F8F7FF",borderRadius:8,padding:"8px 10px"}}>
+                <input type="checkbox" checked={s.include} onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
+                <span style={{flex:1,fontSize:13,fontWeight:600}}>{s.displayName}</span>
+                <input type="number" className="ad-input" style={{width:80,height:34}} value={s.questionCount} min={1}
+                  onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
+                <span style={{fontSize:11,color:"var(--text-3)"}}>Qs</span>
+              </div>
+            ))}
+            {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
+          </div>
+        </div>
+        {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
+        <div style={{display:"flex",gap:10,marginTop:16}}>
+          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
+          <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?<><Spinner/>Creating…</>:"Create Drive"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadModal({ assessment, onClose, onDone }) {
+  const [rows,setRows]=useState([]);     // {name,email,college}
+  const [manual,setManual]=useState("");
+  const [sendShortlist,setSendShortlist]=useState(true);
+  const [err,setErr]=useState(""); const [busy,setBusy]=useState(false); const [result,setResult]=useState(null);
+
+  const parseFile=async(file)=>{
+    try{
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const json=XLSX.utils.sheet_to_json(ws,{defval:""});
+      const mapped=json.map(r=>{
+        const get=(...keys)=>{ for(const k of Object.keys(r)){ if(keys.some(x=>k.trim().toLowerCase()===x)) return String(r[k]).trim(); } return ""; };
+        return { name:get("name","candidate name","full name"), email:get("email","email address","mail"), college:get("college","college name","institution") };
+      }).filter(r=>r.name||r.email||r.college);
+      setRows(mapped); setErr(mapped.length?"":"No rows found. Expected columns: Name, Email, College.");
+    }catch(e){ setErr("Could not read file: "+e.message); }
+  };
+
+  const parseManual=()=>{
+    const lines=manual.split(/\n/).map(l=>l.trim()).filter(Boolean);
+    const mapped=lines.map(l=>{ const [name,email,college]=l.split(",").map(x=>(x||"").trim()); return {name,email,college}; });
+    setRows(mapped);
+  };
+
+  const allRows=()=>{ if(rows.length) return rows; parseManual(); return manual.split(/\n/).map(l=>l.trim()).filter(Boolean).map(l=>{const[n,e,c]=l.split(",").map(x=>(x||"").trim());return{name:n,email:e,college:c};}); };
+
+  const submit=async()=>{
+    const data=allRows();
+    if(!data.length){ setErr("Add candidates via file or manual entry first."); return; }
+    setBusy(true); setErr("");
+    try{
+      const res=await uploadCandidates({ assessmentId:assessment._id, candidates:data, sendShortlist });
+      setResult(res.data);
+    }catch(e){ setErr(e.message||"Upload failed."); }
+    finally{ setBusy(false); }
+  };
+
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <div className="ad-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600}}>
+        <h3 className="ad-modal-title">Upload Candidates — {assessment.name}</h3>
+        {result ? (
+          <div>
+            <div className="ad-empty" style={{background:"#ECFDF5",border:"1px solid #A7F3D0",color:"#065F46",padding:18}}>
+              ✅ {result.addedCount} added · {result.skippedCount} skipped
+              {result.skippedCount>0 && <div style={{fontSize:12,marginTop:8,textAlign:"left"}}>
+                {result.skipped.slice(0,8).map((s,i)=><div key={i}>• {s.email||"row"} — {s.reason}</div>)}
+                {result.skipped.length>8 && <div>…and {result.skipped.length-8} more</div>}
+              </div>}
+            </div>
+            <button className="ad-btn ad-btn--primary" style={{width:"100%",marginTop:14}} onClick={onDone}>Done</button>
+          </div>
+        ) : (
+          <>
+            <div className="ad-field"><label className="ad-label">Upload CSV / Excel</label>
+              <input type="file" accept=".csv,.xlsx,.xls" className="ad-input" onChange={e=>e.target.files[0]&&parseFile(e.target.files[0])}/>
+              <span className="ad-hint">Columns: <strong>Name, Email, College</strong> (header row required).</span></div>
+            <div className="ad-field" style={{marginTop:10}}><label className="ad-label">…or paste manually (one per line: Name, Email, College)</label>
+              <textarea className="ad-input ad-textarea" rows={4} value={manual} onChange={e=>setManual(e.target.value)} placeholder={"Asha R, asha@rvce.edu.in, RVCE\nKiran M, kiran@bmsce.ac.in, BMSCE"}/></div>
+            {rows.length>0 && <div style={{fontSize:13,color:"#059669",fontWeight:600,margin:"6px 0"}}>{rows.length} candidate(s) ready</div>}
+
+            <div className="ad-field" style={{marginTop:8}}>
+              <label className="ad-agree-row" style={{display:"flex",gap:8,alignItems:"center",fontSize:13.5,fontWeight:600,cursor:"pointer"}}>
+                <input type="checkbox" checked={sendShortlist} onChange={e=>setSendShortlist(e.target.checked)}/>
+                Send shortlist email immediately
+              </label>
+            </div>
+            <div className="ad-empty" style={{background:"#EFF6FF",border:"1px solid #BFDBFE",color:"#1E40AF",padding:"12px 14px",textAlign:"left",fontSize:12.5,lineHeight:1.6,marginTop:8}}>
+              📧 The <strong>assessment link</strong> is delivered automatically per this drive's send-time setting
+              {assessment.linkSendAt ? <> (≈ {fmtDateTime(assessment.linkSendAt)})</> : null}.
+              Link expiry follows the drive's end time.
+            </div>
+
+            {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
+              <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={submit} disabled={busy}>{busy?<><Spinner/>Uploading…</>:"Upload & Schedule"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DrivesTab() {
+  const [drives,setDrives]=useState([]);
+  const [sections,setSections]=useState([]);
+  const [sel,setSel]=useState(null);            // selected assessment
+  const [stats,setStats]=useState(null);
+  const [colleges,setColleges]=useState([]);
+  const [cands,setCands]=useState([]);
+  const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
+  const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [search,setSearch]=useState("");
+  const [showCreate,setShowCreate]=useState(false); const [showUpload,setShowUpload]=useState(false);
+  const [picked,setPicked]=useState(new Set());
+  const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
+  const [toast,setToast]=useState(null);   // {type:'success'|'error', title, lines:[]}
+  const showToast=(t)=>{ setToast(t); setTimeout(()=>setToast(null), 9000); };
+
+  const loadDrives=useCallback(async()=>{ try{const r=await fetchAssessments(); setDrives(r.data.data||[]);}catch{} },[]);
+  const loadSections=useCallback(async()=>{ try{const r=await fetchSections(); setSections(r.data.data||[]);}catch{} },[]);
+  useEffect(()=>{ loadDrives(); loadSections(); },[loadDrives,loadSections]);
+
+  const loadDriveData=useCallback(async(assessmentId)=>{
+    setLoading(true);
+    try{
+      const [s,c,cl]=await Promise.all([
+        fetchCandidateStats({assessmentId}),
+        fetchCandidates({assessmentId,page,limit:20,college:fCollege||undefined,status:fStatus||undefined,search:search||undefined}),
+        fetchDriveColleges({assessmentId}),
+      ]);
+      setStats(s.data.data); setCands(c.data.data); setPag(c.data.pagination); setColleges(cl.data.data);
+    }catch{} finally{ setLoading(false); }
+  },[page,fCollege,fStatus,search]);
+
+  useEffect(()=>{ if(sel) loadDriveData(sel._id); },[sel,loadDriveData]);
+
+  const openDrive=(d)=>{ setSel(d); setPage(1); setFCollege(""); setFStatus(""); setSearch(""); setPicked(new Set()); };
+
+  const sendInvites=async()=>{
+    setBusy(true);
+    try{
+      const r=await scheduleInvites({ assessmentId:sel._id, sendNow:true });
+      const d=r.data||{};
+      await loadDriveData(sel._id);
+      if(d.emailConfigured===false){
+        showToast({ type:"error", title:"Email not configured on the server",
+          lines:[`${d.scheduledCount||0} invitation(s) queued.`,"Set EMAIL_USER / EMAIL_PASS and RESTART the backend, then click again."] });
+      } else if(d.smtpError){
+        showToast({ type:"error", title:"SMTP authentication failed",
+          lines:[`${d.scheduledCount||0} queued.`, d.smtpError] });
+      } else {
+        const lines=[`${d.sentCount||0} sent`, `${d.failedCount||0} failed`, `${d.scheduledCount||0} matched/queued`];
+        if(d.errors&&d.errors.length) lines.push("First error: "+(d.errors[0].error||"unknown")+" ("+(d.errors[0].email||"")+")");
+        showToast({ type:(d.failedCount>0?"error":"success"), title:(d.failedCount>0?"Sent with some failures":"Invitations sent"), lines });
+      }
+    }
+    catch(e){ showToast({ type:"error", title:"Request failed", lines:[e.message] }); }
+    finally{ setBusy(false); }
+  };
+  const runTestEmail=async()=>{
+    const to=window.prompt("Send a test email to which address? (leave blank to only verify SMTP auth)","");
+    if(to===null) return;
+    setBusy(true);
+    try{
+      const r=await testEmail(to.trim());
+      const d=r.data||{};
+      showToast({ type:"success", title:d.step==="sent"?"Test email sent":"SMTP verified",
+        lines:[d.message||"OK", `host: ${d.diag?.host}`, `from: ${d.diag?.from}`] });
+    }catch(e){
+      const extra=e.diag?` (host ${e.diag.host}, userSet=${e.diag.userSet}, passSet=${e.diag.passSet})`:"";
+      showToast({ type:"error", title:"Email test failed", lines:[e.message, (e.step?("step: "+e.step):"")+extra] });
+    }finally{ setBusy(false); }
+  };
+  const bulkStatus=async(status)=>{
+    if(!picked.size){ alert("Select candidates first."); return; }
+    setBusy(true);
+    try{ await setCandidateStatus({ candidateIds:[...picked], status }); setPicked(new Set()); await loadDriveData(sel._id); }
+    catch(e){ alert(e.message); } finally{ setBusy(false); }
+  };
+  const removeCand=async(id)=>{ if(!window.confirm("Delete this candidate?"))return; try{await deleteCandidate(id); await loadDriveData(sel._id);}catch(e){alert(e.message);} };
+  const delDrive=async(d)=>{
+    if(!window.confirm(`Delete drive "${d.name}"? This also deletes its candidates.`))return;
+    try{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); }catch(e){alert(e.message);}
+  };
+  const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>alert("Link copied"),()=>{}); };
+  const exportCands=async()=>{
+    try{
+      const r=await fetchCandidates({assessmentId:sel._id,page:1,limit:9999,college:fCollege||undefined,status:fStatus||undefined});
+      const ws=XLSX.utils.json_to_sheet(r.data.data.map(c=>({Name:c.name,Email:c.email,College:c.college,Status:c.status,EmailStatus:c.emailStatus,Score:c.score??"-",TotalMarks:c.totalMarks??"-",Passed:c.passed==null?"-":c.passed?"Yes":"No",Violations:c.violations?.total||0,Completed:fmtDate(c.completedAt)})));
+      const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Candidates"); XLSX.writeFile(wb,`${sel.name.replace(/\s+/g,"_")}_candidates.xlsx`);
+    }catch(e){alert(e.message);}
+  };
+
+  const togglePick=(id)=>setPicked(p=>{const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n;});
+
+  const toastEl = toast && (
+    <div onClick={()=>setToast(null)} style={{position:"fixed",top:18,right:18,zIndex:9999,maxWidth:360,
+      background:toast.type==="error"?"#FEF2F2":"#ECFDF5",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`,
+      color:toast.type==="error"?"#991B1B":"#065F46",borderRadius:12,padding:"14px 16px",boxShadow:"0 10px 30px rgba(0,0,0,.15)",cursor:"pointer"}}>
+      <div style={{fontWeight:800,fontSize:14,marginBottom:6}}>{toast.type==="error"?"⚠ ":"✅ "}{toast.title}</div>
+      {(toast.lines||[]).filter(Boolean).map((l,i)=><div key={i} style={{fontSize:12.5,lineHeight:1.5}}>{l}</div>)}
+      <div style={{fontSize:10,opacity:.6,marginTop:6}}>click to dismiss</div>
+    </div>
+  );
+
+  // ── Drive list view ──
+  if(!sel) return (
+    <div>
+      {toastEl}
+      {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={()=>{setShowCreate(false);loadDrives();}}/>}
+      <div className="ad-section-head">
+        <div className="ad-page-title">Campus Drives</div>
+        <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>
+      </div>
+      <p style={{fontSize:13,color:"var(--text-3)",marginBottom:18}}>Invitation-based assessments. Upload candidates, schedule emails, and track results by college — separate from the legacy public-registration data.</p>
+      {drives.length===0 ? <div className="ad-empty">No drives yet. Click "New Drive" to create one.</div> :
+        <div className="ad-stats-grid">
+          {drives.map(d=>(
+            <div key={d._id} className="ad-stat-card" style={{borderTopColor:"#1a56db",cursor:"pointer",textAlign:"left",alignItems:"flex-start"}} onClick={()=>openDrive(d)}>
+              <div style={{fontSize:15,fontWeight:800,color:"var(--text-1)",marginBottom:6}}>{d.name}</div>
+              <div style={{fontSize:12,color:"var(--text-3)"}}>{d.durationMinutes} min · {d.candidateCount} candidates · {d.completedCount} completed</div>
+              <div style={{fontSize:11,color:"var(--text-3)",marginTop:6,lineHeight:1.6}}>
+                {d.startAt ? <>📅 {fmtDate(d.assessmentDate||d.startAt)} · ⏰ {fmtTimeOnly(d.startAt)}–{fmtTimeOnly(d.endAt)}<br/></> : <>Deadline: {fmtDate(d.deadline)}<br/></>}
+                {d.startAt && <>🔗 Link: {LINK_SEND_OPTIONS.find(o=>o.value===d.linkSendOption)?.label || "—"}</>}
+              </div>
+              <div style={{display:"flex",gap:6,marginTop:10}}>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();openDrive(d);}}>Open</button>
+                <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={e=>{e.stopPropagation();delDrive(d);}}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>}
+    </div>
+  );
+
+  // ── Single drive view ──
+  return (
+    <div>
+      {toastEl}
+      {showUpload && <UploadModal assessment={sel} onClose={()=>setShowUpload(false)} onDone={()=>{setShowUpload(false);loadDriveData(sel._id);}}/>}
+      <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setSel(null)} style={{marginBottom:14}}>← All Drives</button>
+      <div className="ad-section-head">
+        <div className="ad-page-title" style={{marginBottom:0}}>{sel.name}</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="ad-btn ad-btn--primary" onClick={()=>setShowUpload(true)}>+ Upload Candidates</button>
+          <button className="ad-btn ad-btn--outline" onClick={sendInvites} disabled={busy}>{busy?<><Spinner/>…</>:"📧 Send Pending Invites"}</button>
+          <button className="ad-btn ad-btn--outline" onClick={runTestEmail} disabled={busy}>✉ Test Email</button>
+          <button className="ad-btn ad-btn--export" onClick={exportCands}>⬇ Export</button>
+        </div>
+      </div>
+
+      {/* Schedule summary */}
+      <div className="ad-empty" style={{textAlign:"left",padding:"12px 16px",marginBottom:16,background:"#F8FAFC",border:"1px solid #E2E8F0",display:"flex",gap:24,flexWrap:"wrap",fontSize:13}}>
+        <span><strong>Date:</strong> {fmtDate(sel.assessmentDate||sel.startAt)}</span>
+        <span><strong>Start:</strong> {fmtTimeOnly(sel.startAt)}</span>
+        <span><strong>End:</strong> {fmtTimeOnly(sel.endAt)}</span>
+        <span><strong>Link Send:</strong> {LINK_SEND_OPTIONS.find(o=>o.value===sel.linkSendOption)?.label || "—"}{sel.linkSendAt?` (${fmtDateTime(sel.linkSendAt)})`:""}</span>
+      </div>
+
+      {/* Delivery / pipeline counters */}
+      {stats?.counters && (
+        <div className="ad-stats-grid" style={{marginBottom:14}}>
+          {[
+            {label:"Candidates Uploaded", val:stats.counters.uploaded,            color:"#4F46E5"},
+            {label:"Shortlist Emails Sent",val:stats.counters.shortlistEmailsSent, color:"#0891B2"},
+            {label:"Assessment Links Sent",val:stats.counters.linkEmailsSent,      color:"#2563EB"},
+            {label:"Started",             val:stats.counters.started,             color:"#D97706"},
+            {label:"Completed",           val:stats.counters.completed,           color:"#059669"},
+            {label:"Disqualified",        val:stats.counters.disqualified,        color:"#DC2626"},
+          ].map(s=>(
+            <div key={s.label} className="ad-stat-card" style={{borderTopColor:s.color}}>
+              <div className="ad-stat-val" style={{color:s.color}}>{s.val||0}</div>
+              <div className="ad-stat-lbl">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Status pipeline counters */}
+      {stats && (
+        <div className="ad-stats-grid" style={{marginBottom:18}}>
+          {STATUS_META.map(s=>(
+            <div key={s.key} className="ad-stat-card" style={{borderTopColor:s.color}}>
+              <div className="ad-stat-val" style={{color:s.color}}>{stats.statusCounts[s.key]||0}</div>
+              <div className="ad-stat-lbl">{s.label}</div>
+            </div>
+          ))}
+          <div className="ad-stat-card" style={{borderTopColor:"#DC2626"}}>
+            <div className="ad-stat-val" style={{color:"#DC2626"}}>{stats.totalViolations||0}</div>
+            <div className="ad-stat-lbl">Total Violations</div>
+          </div>
+        </div>
+      )}
+
+      {/* College-wise breakdown */}
+      {stats?.byCollege?.length>0 && (
+        <div className="ad-table-wrap" style={{marginBottom:18}}>
+          <table className="ad-table">
+            <thead><tr><th>College</th><th>Candidates</th><th>Completed</th><th>Shortlisted</th><th>Avg Score</th></tr></thead>
+            <tbody>{stats.byCollege.map(c=>(
+              <tr key={c.college}><td><strong>{c.college}</strong></td><td>{c.total}</td><td>{c.completed}</td><td>{c.shortlisted}</td><td>{c.avgScore??"—"}</td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="ad-toolbar">
+        <input className="ad-search" placeholder="Search name, email…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+        <select className="ad-select" value={fCollege} onChange={e=>{setFCollege(e.target.value);setPage(1);}}>
+          <option value="">All Colleges</option>{colleges.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="ad-select" value={fStatus} onChange={e=>{setFStatus(e.target.value);setPage(1);}}>
+          <option value="">All Status</option>{STATUS_META.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+      </div>
+
+      {/* Bulk actions */}
+      {picked.size>0 && (
+        <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+          <span style={{fontSize:13,fontWeight:600}}>{picked.size} selected</span>
+          <button className="ad-btn ad-btn--sm ad-btn--primary" onClick={()=>bulkStatus("shortlisted")} disabled={busy}>Shortlist</button>
+          <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>bulkStatus("rejected")} disabled={busy}>Reject</button>
+        </div>
+      )}
+
+      <div className="ad-table-wrap">
+        {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
+        :cands.length===0?<div className="ad-empty">No candidates yet. Click "Upload Candidates".</div>
+        :<table className="ad-table">
+          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Status</th><th>Shortlist</th><th>Link</th><th>Score</th><th>Viol.</th><th>Link</th><th></th></tr></thead>
+          <tbody>{cands.map((c,i)=>{
+            const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
+            return (
+              <tr key={c._id}>
+                <td><input type="checkbox" checked={picked.has(c._id)} onChange={()=>togglePick(c._id)}/></td>
+                <td className="ad-td-num">{(page-1)*20+i+1}</td>
+                <td><div className="ad-td-name"><div className="ad-avatar">{c.name.charAt(0)}</div>{c.name}</div></td>
+                <td className="ad-td-sm">{c.college}</td>
+                <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
+                <td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>
+                <td className="ad-td-sm">{c.emailStatus}</td>
+                <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
+                <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
+                <td><button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button></td>
+                <td><button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>removeCand(c._id)}>Delete</button></td>
+              </tr>
+            );
+          })}</tbody>
+        </table>}
+      </div>
+      <Pagination pag={pag} page={page} setPage={setPage}/>
+    </div>
+  );
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 const TABS = [
   { id:"dashboard", icon:"📊", label:"Dashboard"  },
+  { id:"drives",    icon:"🎓", label:"Campus Drives" },
   { id:"students",  icon:"👥", label:"Students"   },
   { id:"attempts",  icon:"📋", label:"Attempts"   },
   { id:"questions", icon:"❓", label:"Questions"  },
@@ -599,7 +1082,7 @@ function Dashboard({ onLogout }) {
     <div className="ad-page">
       <header className="ad-topbar">
         <div className="ad-topbar-left">
-          <div className="ad-topbar-logo">M</div>
+          <div className="ad-topbar-logo"><img src="/logo.png" alt="MH Academy" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
           <div>
             <div className="ad-topbar-title">Mandi Hariyanna Academy</div>
             <div className="ad-topbar-sub">Admin Dashboard · Mandi Harish Foundation®</div>
@@ -642,6 +1125,8 @@ function Dashboard({ onLogout }) {
             )}
           </div>
         )}
+
+        {tab==="drives" && <DrivesTab/>}
 
         {tab==="students" && (
           <div>

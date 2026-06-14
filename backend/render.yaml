@@ -25,4 +25,25 @@ services:
       - key: REDIS_URL
         sync: false      # optional
       - key: FRONTEND_URL
-        sync: false      # your Hostinger URL
+        sync: false      # your Hostinger / Vercel URL (CORS + invite links)
+      - key: FRONTEND_URL_2
+        sync: false      # optional second allowed origin
+      - key: MONGO_POOL_SIZE
+        value: 20
+      # ── Email (invitations + thank-you). Without these, invites queue but won't send. ──
+      - key: EMAIL_HOST
+        sync: false      # smtp.gmail.com / smtp-relay.brevo.com / email-smtp.<region>.amazonaws.com
+      - key: EMAIL_PORT
+        value: 587
+      - key: EMAIL_SECURE
+        value: false     # true only for port 465
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false      # Gmail App Password / provider SMTP key
+      - key: EMAIL_FROM
+        sync: false      # "MH Academy <no-reply@yourdomain.com>"
+      - key: EMAIL_BATCH_SIZE
+        value: 25
+      - key: EMAIL_MAX_ATTEMPTS
+        value: 3
