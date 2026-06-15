@@ -2,7 +2,7 @@ const Candidate  = require("../models/Candidate");
 const Assessment = require("../models/Assessment");
 const {
   sendLinkEmail, sendShortlistEmail, sendThankYouEmail, sendDisqualificationEmail,
-  emailConfigured, emailDiag,
+  emailConfigured, emailDiag, logMailError,
 } = require("./email");
 
 const MAX_ATTEMPTS  = parseInt(process.env.EMAIL_MAX_ATTEMPTS) || 3;
@@ -48,7 +48,8 @@ async function deliverLink(candidate) {
     if (attempts >= MAX_ATTEMPTS) candidate.emailStatus = "failed";
     else { candidate.emailStatus = "scheduled"; candidate.emailScheduledAt = new Date(Date.now() + attempts * attempts * 60000); }
     await candidate.save();
-    console.warn(`[emailQueue] ✖ LINK ${candidate.email} failed (${attempts}/${MAX_ATTEMPTS}): ${err.message}`);
+    console.warn(`[emailQueue] ✖ LINK ${candidate.email} attempt ${attempts}/${MAX_ATTEMPTS} → status=${candidate.emailStatus}`);
+    logMailError(`LINK ${candidate.email}`, err);
     return { ok: false, error: err.message, email: candidate.email };
   }
 }
@@ -84,7 +85,8 @@ async function deliverShortlist(candidate) {
     if (attempts >= MAX_ATTEMPTS) candidate.shortlistEmail.status = "failed";
     else { candidate.shortlistEmail.status = "scheduled"; candidate.shortlistEmail.scheduledAt = new Date(Date.now() + attempts * attempts * 60000); }
     await candidate.save();
-    console.warn(`[emailQueue] ✖ SHORTLIST ${candidate.email} failed (${attempts}/${MAX_ATTEMPTS}): ${err.message}`);
+    console.warn(`[emailQueue] ✖ SHORTLIST ${candidate.email} attempt ${attempts}/${MAX_ATTEMPTS} → status=${candidate.shortlistEmail.status}`);
+    logMailError(`SHORTLIST ${candidate.email}`, err);
     return { ok: false, error: err.message, email: candidate.email };
   }
 }
@@ -166,7 +168,7 @@ async function queueThankYou(candidate, assessment) {
     await sendThankYouEmail(candidate, assessment);
     await Candidate.updateOne({ _id: candidate._id }, { $set: { thankYouEmailSentAt: new Date() } });
     console.log(`[emailQueue] ✔ thank-you sent to ${candidate.email}`);
-  } catch (err) { console.warn(`[emailQueue] thank-you to ${candidate.email} failed: ${err.message}`); }
+  } catch (err) { logMailError(`thank-you ${candidate.email}`, err); }
 }
 
 async function queueDisqualification(candidate) {
@@ -175,7 +177,7 @@ async function queueDisqualification(candidate) {
     await sendDisqualificationEmail(candidate);
     await Candidate.updateOne({ _id: candidate._id }, { $set: { disqualificationEmailSentAt: new Date() } });
     console.log(`[emailQueue] ✔ disqualification email sent to ${candidate.email}`);
-  } catch (err) { console.warn(`[emailQueue] disqualification email to ${candidate.email} failed: ${err.message}`); }
+  } catch (err) { logMailError(`disqualification ${candidate.email}`, err); }
 }
 
 module.exports = { startScheduler, processQueue, flushNow, buildLink, queueThankYou, queueDisqualification, MAX_ATTEMPTS };

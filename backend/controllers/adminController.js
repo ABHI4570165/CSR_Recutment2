@@ -241,35 +241,38 @@ exports.deleteSection = async (req, res) => {
 
 // ── Email diagnostics + test send (temporary admin tool) ───────────────────────
 exports.testEmail = async (req, res) => {
-  const { emailDiag, emailConfigured, verifyTransport, sendMail } = require("../utils/email");
+  const { emailDiag, emailConfigured, verifyTransport, sendMail, logMailError } = require("../utils/email");
   const to = (req.body?.to || "").trim();
   const diag = emailDiag();
-  console.log("[testEmail] requested →", to, "| diag:", JSON.stringify(diag));
+  console.log("[testEmail] STEP 1 request received → to:", to, "| diag:", JSON.stringify(diag));
   if (!emailConfigured()) {
     return res.status(400).json({ success: false, step: "config",
-      message: "Email NOT configured (EMAIL_USER/EMAIL_PASS missing in the running process). Set them and restart the backend.", diag });
+      message: "Email NOT configured. Set BREVO_API_KEY (recommended on Render) or EMAIL_USER/EMAIL_PASS, then restart.", diag });
   }
   const verify = await verifyTransport();
   if (!verify.ok) {
-    return res.status(502).json({ success: false, step: "smtp-auth",
-      message: `SMTP authentication failed: ${verify.error}`, diag, error: verify.error });
+    return res.status(502).json({ success: false, step: "verify",
+      message: `Transport verification failed: ${verify.error}${verify.code ? ` (${verify.code})` : ""}. ` +
+        `If on Render with SMTP, the platform likely blocks SMTP ports — set BREVO_API_KEY to send over HTTPS.`,
+      diag, error: verify.error, code: verify.code });
   }
   if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
-    return res.json({ success: true, step: "verify-only", smtpAuth: "ok", diag,
-      message: "SMTP authentication succeeded. Provide a valid 'to' address to send a real test email." });
+    return res.json({ success: true, step: "verify-only", diag,
+      message: "Transport verified. Provide a valid 'to' address to send a real test email." });
   }
   try {
     const messageId = await sendMail({
       to,
-      subject: "MH Academy — SMTP Test ✅",
-      html: `<div style="font-family:Arial;padding:20px"><h2>SMTP test successful</h2><p>If you received this, your MH Academy email pipeline is working.</p></div>`,
-      text: "SMTP test successful — your MH Academy email pipeline is working.",
+      subject: "MH Academy — Email Test ✅",
+      html: `<div style="font-family:Arial;padding:20px"><h2>Email test successful</h2><p>If you received this, your MH Academy email pipeline is working.</p></div>`,
+      text: "Email test successful — your MH Academy email pipeline is working.",
     });
-    console.log(`[testEmail] ✔ sent to ${to} (messageId: ${messageId})`);
-    res.json({ success: true, step: "sent", smtpAuth: "ok", messageId, diag, message: `Test email sent to ${to}.` });
+    console.log(`[testEmail] STEP 9 response → sent to ${to} (messageId: ${messageId})`);
+    res.json({ success: true, step: "sent", messageId, diag, message: `Test email sent to ${to}.` });
   } catch (err) {
-    console.error("[testEmail] send failed:", err.message);
-    res.status(502).json({ success: false, step: "send", message: `Send failed: ${err.message}`, error: err.message, diag });
+    logMailError(`testEmail to ${to}`, err);
+    res.status(502).json({ success: false, step: "send",
+      message: `Send failed: ${err.message}`, error: err.message, code: err.code, response: err.response, diag });
   }
 };
 

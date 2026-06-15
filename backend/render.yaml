@@ -30,7 +30,12 @@ services:
         sync: false      # optional second allowed origin
       - key: MONGO_POOL_SIZE
         value: 20
-      # ── Email (invitations + thank-you). Without these, invites queue but won't send. ──
+      # ── Email ──────────────────────────────────────────────────────────────────
+      # RENDER BLOCKS OUTBOUND SMTP (ports 25/465/587). Set BREVO_API_KEY to send
+      # over HTTPS (port 443) — the reliable path on Render. SMTP vars below are the
+      # fallback (used locally / on hosts that allow SMTP).
+      - key: BREVO_API_KEY
+        sync: false      # Brevo → SMTP & API → API Keys (starts with "xkeysib-")
       - key: EMAIL_HOST
         sync: false      # smtp.gmail.com / smtp-relay.brevo.com / email-smtp.<region>.amazonaws.com
       - key: EMAIL_PORT

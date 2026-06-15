@@ -18,57 +18,148 @@ function logoAttachment() {
   return logoExists() ? [{ filename: "logo.png", path: LOGO_PATH, cid: LOGO_CID }] : [];
 }
 
+// ── Delivery mode ──────────────────────────────────────────────────────────────
+// Render's free/standard egress BLOCKS outbound SMTP ports (25/465/587). When a
+// Brevo HTTP API key is present we send over HTTPS (443) — which Render allows —
+// instead of SMTP. This is the production-correct path; SMTP stays as a fallback
+// (and is what runs locally).
+function usingApi() { return !!process.env.BREVO_API_KEY; }
+
+// Full, password-free error dump for Render logs.
+function logMailError(ctx, err) {
+  console.error(`[email] ✖ ${ctx} FAILED`);
+  console.error(`        message:      ${err?.message}`);
+  console.error(`        code:         ${err?.code}`);
+  console.error(`        command:      ${err?.command}`);
+  console.error(`        responseCode: ${err?.responseCode}`);
+  console.error(`        response:     ${err?.response}`);
+  if (err?.stack) console.error(`        stack:        ${String(err.stack).split("\n").slice(0, 4).join(" | ")}`);
+}
+
 function getTransporter() {
   if (transporter) return transporter;
+  const port = parseInt(process.env.EMAIL_PORT) || 587;
+  const secure = String(process.env.EMAIL_SECURE) === "true"; // true for 465, false for 587/STARTTLS
+  console.log(`[email] STEP 2 creating SMTP transport host=${process.env.EMAIL_HOST || "smtp.gmail.com"} port=${port} secure=${secure}`);
   transporter = nodemailer.createTransport({
     host:   process.env.EMAIL_HOST || "smtp.gmail.com",
-    port:   parseInt(process.env.EMAIL_PORT) || 587,
-    secure: String(process.env.EMAIL_SECURE) === "true", // true for 465, false for 587
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
+    port,
+    secure,
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+    requireTLS: !secure,                 // enforce STARTTLS on 587
     pool: true,
     maxConnections: parseInt(process.env.EMAIL_MAX_CONNECTIONS) || 5,
     maxMessages: 100,
     rateDelta: 1000,
-    rateLimit: parseInt(process.env.EMAIL_RATE_LIMIT) || 5, // messages/sec — protects SMTP from a 500-burst
+    rateLimit: parseInt(process.env.EMAIL_RATE_LIMIT) || 5,
+    // Explicit timeouts so a BLOCKED port fails fast & loud instead of hanging forever.
+    connectionTimeout: parseInt(process.env.EMAIL_CONN_TIMEOUT) || 10000, // TCP connect
+    greetingTimeout:   parseInt(process.env.EMAIL_GREET_TIMEOUT) || 10000, // SMTP greeting
+    socketTimeout:     parseInt(process.env.EMAIL_SOCKET_TIMEOUT) || 20000, // inactivity
   });
+  console.log(`[email] STEP 3 SMTP transport created`);
   return transporter;
 }
 
 function emailConfigured() {
-  return !!(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+  return usingApi() || !!(process.env.EMAIL_USER && process.env.EMAIL_PASS);
 }
 
 // Non-secret diagnostic of which email vars are present (for logging / test endpoint).
 function emailDiag() {
   return {
+    mode: usingApi() ? "brevo-api(https:443)" : "smtp",
+    apiKeySet: usingApi(),
     host: process.env.EMAIL_HOST || "(default smtp.gmail.com)",
     port: process.env.EMAIL_PORT || "587",
     secure: String(process.env.EMAIL_SECURE) === "true",
     userSet: !!process.env.EMAIL_USER,
     passSet: !!process.env.EMAIL_PASS,
     from: process.env.EMAIL_FROM || "(default)",
-    configured: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS),
+    configured: emailConfigured(),
   };
 }
 
-// Verify SMTP auth without sending. Returns { ok, error }.
+// Parse "Name <email@x>" or "email@x" into { name, email } for the Brevo API.
+function parseFrom(raw) {
+  const s = String(raw || "MH Academy <no-reply@mhacademy.in>").trim();
+  const m = s.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
+  if (m) return { name: m[1].trim() || "MH Academy", email: m[2].trim() };
+  return { name: "MH Academy", email: s };
+}
+
+// ── Send over Brevo HTTPS API (port 443 — not blocked on Render) ───────────────
+async function sendViaBrevoApi({ to, subject, html, text, attachments }) {
+  if (typeof fetch !== "function") throw new Error("global fetch unavailable — Node 18+ required for Brevo API mode");
+  const sender = parseFrom(process.env.EMAIL_FROM);
+  const payload = {
+    sender,
+    to: [{ email: to }],
+    subject,
+    ...(html ? { htmlContent: html } : {}),
+    ...(text ? { textContent: text } : {}),
+  };
+  if (attachments && attachments.length) {
+    payload.attachment = attachments
+      .filter(a => a.path && fs.existsSync(a.path))
+      .map(a => ({ name: a.filename || "attachment", content: fs.readFileSync(a.path).toString("base64") }));
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), parseInt(process.env.EMAIL_API_TIMEOUT) || 15000);
+  let resp, data;
+  try {
+    resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: { "api-key": process.env.BREVO_API_KEY, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    data = await resp.json().catch(() => ({}));
+  } finally { clearTimeout(timer); }
+  if (!resp.ok) {
+    const e = new Error(`Brevo API ${resp.status}: ${data?.message || data?.code || JSON.stringify(data)}`);
+    e.code = `BREVO_${resp.status}`; e.responseCode = resp.status; e.response = JSON.stringify(data);
+    throw e;
+  }
+  console.log(`[email] STEP 7 accepted by Brevo API · STEP 8 messageId=${data?.messageId}`);
+  return data?.messageId || "brevo-api";
+}
+
+// Verify the transport before sending. Returns { ok, error }.
 async function verifyTransport() {
-  try { await getTransporter().verify(); return { ok: true }; }
-  catch (err) { return { ok: false, error: err.message }; }
+  if (usingApi()) {
+    console.log("[email] STEP 4 verify skipped (Brevo HTTPS API mode) · STEP 5 ok");
+    return { ok: true, mode: "api" };
+  }
+  try {
+    console.log("[email] STEP 4 verifying SMTP connection…");
+    await getTransporter().verify();
+    console.log("[email] STEP 5 SMTP verified OK");
+    return { ok: true, mode: "smtp" };
+  } catch (err) {
+    logMailError("SMTP verify", err);
+    return { ok: false, error: err.message, code: err.code };
+  }
 }
 
 // Generic send. Throws on failure so the queue can record + retry.
 async function sendMail({ to, subject, html, text, attachments }) {
-  const t = getTransporter();
-  const info = await t.sendMail({
-    from: process.env.EMAIL_FROM || "MH Academy <noreply@mhacademy.in>",
-    to, subject, html, text,
-    ...(attachments && attachments.length ? { attachments } : {}),
-  });
-  return info.messageId;
+  const api = usingApi();
+  console.log(`[email] STEP 6 sending → to=${to} subject="${subject}" via=${api ? "Brevo-API(HTTPS)" : `SMTP ${process.env.EMAIL_HOST}:${process.env.EMAIL_PORT || 587}`}`);
+  try {
+    if (api) return await sendViaBrevoApi({ to, subject, html, text, attachments });
+    const t = getTransporter();
+    const info = await t.sendMail({
+      from: process.env.EMAIL_FROM || "MH Academy <noreply@mhacademy.in>",
+      to, subject, html, text,
+      ...(attachments && attachments.length ? { attachments } : {}),
+    });
+    console.log(`[email] STEP 7 accepted=${JSON.stringify(info.accepted)} rejected=${JSON.stringify(info.rejected)} · STEP 8 messageId=${info.messageId}`);
+    return info.messageId;
+  } catch (err) {
+    logMailError(`sendMail to ${to}`, err);
+    throw err;
+  }
 }
 
 // ── Brand constants ───────────────────────────────────────────────────────────
@@ -291,6 +382,7 @@ module.exports = {
   emailConfigured,
   emailDiag,
   verifyTransport,
+  logMailError,
   sendInvitationEmail,
   sendLinkEmail,
   sendShortlistEmail,
