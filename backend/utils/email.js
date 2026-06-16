@@ -25,6 +25,12 @@ function logoAttachment() {
 // (and is what runs locally).
 function usingApi() { return !!process.env.BREVO_API_KEY; }
 
+// Structural sanity check for the Brevo key (no value exposed).
+function apiKeyLooksValid() {
+  const k = process.env.BREVO_API_KEY || "";
+  return k.startsWith("xsmtpsib-") && k.length > 50;
+}
+
 // Full, password-free error dump for Render logs.
 function logMailError(ctx, err) {
   console.error(`[email] ✖ ${ctx} FAILED`);
@@ -70,6 +76,7 @@ function emailDiag() {
   return {
     mode: usingApi() ? "brevo-api(https:443)" : "smtp",
     apiKeySet: usingApi(),
+    apiKeyLooksValid: apiKeyLooksValid(),
     host: process.env.EMAIL_HOST || "(default smtp.gmail.com)",
     port: process.env.EMAIL_PORT || "587",
     secure: String(process.env.EMAIL_SECURE) === "true",
@@ -117,7 +124,10 @@ async function sendViaBrevoApi({ to, subject, html, text, attachments }) {
     data = await resp.json().catch(() => ({}));
   } finally { clearTimeout(timer); }
   if (!resp.ok) {
-    const e = new Error(`Brevo API ${resp.status}: ${data?.message || data?.code || JSON.stringify(data)}`);
+    const msg = resp.status === 401
+      ? "Brevo API key is invalid or has been revoked. Regenerate it at app.brevo.com → Settings → API Keys and update BREVO_API_KEY in your Render environment variables."
+      : `Brevo API ${resp.status}: ${data?.message || data?.code || JSON.stringify(data)}`;
+    const e = new Error(msg);
     e.code = `BREVO_${resp.status}`; e.responseCode = resp.status; e.response = JSON.stringify(data);
     throw e;
   }
@@ -376,6 +386,15 @@ async function sendQuizLink(to, name, quizLink) {
     return false;
   }
 }
+
+// ── Startup diagnostic (runs once when this module is first required) ───────────
+(function logEmailStartup() {
+  if (usingApi()) {
+    console.log(`[email] startup → mode=brevo-api(https:443) · apiKeySet=true · apiKeyLooksValid=${apiKeyLooksValid()}`);
+  } else {
+    console.log(`[email] startup → mode=smtp · host=${process.env.EMAIL_HOST || "(default)"} · userSet=${!!process.env.EMAIL_USER} · passSet=${!!process.env.EMAIL_PASS}`);
+  }
+})();
 
 module.exports = {
   sendMail,
