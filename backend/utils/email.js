@@ -4,18 +4,12 @@ const fs = require("fs");
 
 let transporter = null;
 
-// Logo embedded inline in emails via CID (works without any external hosting).
-// Drop the academy logo at backend/assets/logo.png to enable it.
-const LOGO_PATH = path.join(__dirname, "..", "assets", "logo.png");
-const LOGO_CID = "mhacademylogo";
-function logoExists() { try { return fs.existsSync(LOGO_PATH); } catch { return false; } }
+// Logo referenced from the public frontend origin (FRONTEND_URL/logo.png).
+// A hosted HTTPS URL renders reliably in Gmail, Outlook, and all webmail —
+// works in both SMTP and Brevo HTTPS API mode (no CID, no attachment).
 function logoImgTag() {
-  return logoExists()
-    ? `<img src="cid:${LOGO_CID}" alt="MH Academy" width="64" height="64" style="display:block;margin:0 auto 10px;border-radius:12px;background:#fff;padding:4px;" />`
-    : "";
-}
-function logoAttachment() {
-  return logoExists() ? [{ filename: "logo.png", path: LOGO_PATH, cid: LOGO_CID }] : [];
+  const logoUrl = `${(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "")}/logo.png`;
+  return `<img src="${logoUrl}" alt="MH Academy" width="64" height="64" style="display:block;margin:0 auto 10px;border-radius:12px;background:#fff;padding:4px;" />`;
 }
 
 // ── Delivery mode ──────────────────────────────────────────────────────────────
@@ -323,7 +317,6 @@ async function sendLinkEmail(candidate, assessment, link) {
     subject: `Your Assessment Link Is Ready | ${BRAND}`,
     html: linkReadyHtml({ name: candidate.name, dateStr, timeStr, link }),
     text: `Dear ${candidate.name},\n\nYour assessment is scheduled on ${dateStr} at ${timeStr}.\n\nOpen your assessment: ${link}\n\nEnsure fullscreen, webcam, and a stable connection. Attempt only within the scheduled window.\n\n${BRAND} · ${HIRING_PARTNER}`,
-    attachments: logoAttachment(),
   });
 }
 // Back-compat alias — older code/imports call sendInvitationEmail.
@@ -337,7 +330,6 @@ async function sendShortlistEmail(candidate, assessment) {
     subject: `Congratulations! You Have Been Shortlisted | ${BRAND}`,
     html: shortlistHtml({ name: candidate.name, dateStr, timeStr }),
     text: `Dear ${candidate.name},\n\nCongratulations! You have been shortlisted for the recruitment assessment by ${BRAND} in association with ${HIRING_PARTNER}.\n\nAssessment Date: ${dateStr}\nAssessment Time: ${timeStr}\n\nEnsure you have a laptop/desktop, webcam, stable internet, a quiet room, and updated Chrome/Edge.\n\nYour assessment link will be shared separately before the assessment.\n\n${BRAND} · ${HIRING_PARTNER}`,
-    attachments: logoAttachment(),
   });
 }
 
@@ -347,7 +339,6 @@ async function sendDisqualificationEmail(candidate) {
     subject: `Assessment Session Terminated | ${BRAND}`,
     html: disqualificationHtml({ name: candidate.name }),
     text: `Dear ${candidate.name || "Candidate"},\n\nWe detected multiple violations of the assessment guidelines during your assessment session. As a result, your assessment has been automatically terminated.\n\nYou may participate in future recruitment opportunities conducted by ${BRAND} and ${HIRING_PARTNER}.\n\nThank you for your interest.\n\n${BRAND} · ${HIRING_PARTNER}`,
-    attachments: logoAttachment(),
   });
 }
 
@@ -357,7 +348,6 @@ async function sendThankYouEmail(candidate, assessment) {
     subject: `Assessment Completed — ${assessment?.name || ""} | ${BRAND}`,
     html: thankYouHtml({ name: candidate.name, assessmentName: assessment?.name }),
     text: `Thank you ${candidate.name}! Your responses for ${assessment?.name || "the assessment"} have been recorded.\n\n${BRAND} · ${HIRING_PARTNER}`,
-    attachments: logoAttachment(),
   });
 }
 

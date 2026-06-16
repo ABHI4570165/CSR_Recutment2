@@ -14,8 +14,7 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Compound + single indexes for fast lookups
-userSchema.index({ email: 1 });
-userSchema.index({ rollNo: 1 });
+// (email & rollNo already get unique indexes from their field definitions)
 userSchema.index({ score: -1 });
 userSchema.index({ quizCompleted: 1 });
 userSchema.index({ createdAt: -1 });
