@@ -45,7 +45,7 @@ const RULES = [
 
 /* ── Status screens ──────────────────────────────────────────────────────────── */
 function BrandLogo({ className }) {
-  return <img src="/logo.png" alt="MH Academy" className={className}
+  return <img src="/logo.png" alt="M H Foundation" className={className}
     onError={(e) => { e.currentTarget.style.display = "none"; }} />;
 }
 
@@ -684,7 +684,7 @@ export default function AssessmentPage() {
     return (
       <div className="asmt-landing">
         <header className="asmt-top">
-          <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />MH ACADEMY</div>
+          <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />M H FOUNDATION</div>
           <div className="asmt-partner">Hiring Partner · Inference Labs Pvt. Ltd.</div>
         </header>
         <div className="asmt-landing-body">
@@ -718,7 +718,7 @@ export default function AssessmentPage() {
     return (
       <div className="asmt-landing">
         <header className="asmt-top">
-          <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />MH ACADEMY</div>
+          <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />M H FOUNDATION</div>
           <div className="asmt-partner">Hiring Partner · Inference Labs Pvt. Ltd.</div>
         </header>
         <div className="asmt-rules-body">
@@ -894,7 +894,7 @@ export default function AssessmentPage() {
           <div className="qp-brand">
             <BrandLogo className="asmt-header-logo" />
             <div>
-              <div className="qp-brand-title">MH ACADEMY</div>
+              <div className="qp-brand-title">M H FOUNDATION</div>
               <div className="qp-brand-welcome">Inference Labs Private Limited · {info?.assessmentName}</div>
             </div>
           </div>

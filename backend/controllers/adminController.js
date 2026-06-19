@@ -263,9 +263,9 @@ exports.testEmail = async (req, res) => {
   try {
     const messageId = await sendMail({
       to,
-      subject: "MH Academy — Email Test ✅",
-      html: `<div style="font-family:Arial;padding:20px"><h2>Email test successful</h2><p>If you received this, your MH Academy email pipeline is working.</p></div>`,
-      text: "Email test successful — your MH Academy email pipeline is working.",
+      subject: "M H Foundation — Email Test ✅",
+      html: `<div style="font-family:Arial;padding:20px"><h2>Email test successful</h2><p>If you received this, your M H Foundation email pipeline is working.</p></div>`,
+      text: "Email test successful — your M H Foundation email pipeline is working.",
     });
     console.log(`[testEmail] STEP 9 response → sent to ${to} (messageId: ${messageId})`);
     res.json({ success: true, step: "sent", messageId, diag, message: `Test email sent to ${to}.` });

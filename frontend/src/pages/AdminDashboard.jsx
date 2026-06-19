@@ -286,9 +286,9 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="ad-login-page">
       <div className="ad-login-card">
-        <div className="ad-login-logo"><img src="/logo.png" alt="MH Academy" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
-        <div className="ad-login-brand">Mandi Hariyanna Academy</div>
-        <div className="ad-login-sub">Mandi Harish Foundation® · Admin Portal</div>
+        <div className="ad-login-logo"><img src="/logo.png" alt="M H Foundation" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
+        <div className="ad-login-brand">M H FOUNDATION</div>
+        <div className="ad-login-sub">M H Foundation® · Admin Portal</div>
         <form className="ad-login-form" onSubmit={submit}>
           <div className="ad-field">
             <label className="ad-label">Username</label>
@@ -1082,10 +1082,10 @@ function Dashboard({ onLogout }) {
     <div className="ad-page">
       <header className="ad-topbar">
         <div className="ad-topbar-left">
-          <div className="ad-topbar-logo"><img src="/logo.png" alt="MH Academy" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
+          <div className="ad-topbar-logo"><img src="/logo.png" alt="M H Foundation" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
           <div>
-            <div className="ad-topbar-title">Mandi Hariyanna Academy</div>
-            <div className="ad-topbar-sub">Admin Dashboard · Mandi Harish Foundation®</div>
+            <div className="ad-topbar-title">M H FOUNDATION</div>
+            <div className="ad-topbar-sub">Admin Dashboard · M H Foundation®</div>
           </div>
         </div>
         <button className="ad-btn ad-btn--outline ad-btn--logout" onClick={onLogout}>Sign Out</button>

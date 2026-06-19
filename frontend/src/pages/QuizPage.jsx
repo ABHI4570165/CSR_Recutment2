@@ -308,7 +308,7 @@ export default function QuizPage() {
           <h3 className="qp-result-msg-title">Results Will Be Announced Soon</h3>
           <p className="qp-result-msg-text">
             Your responses have been recorded successfully. Results will be declared
-            by <strong>Mandi Hariyanna Academy</strong> through official channels.
+            by <strong>M H Foundation</strong> through official channels.
           </p>
         </div>
         <div className="qp-result-info-grid">
@@ -332,7 +332,7 @@ export default function QuizPage() {
           <h2 className="qp-result-thanks-title">Thank You for Attending!</h2>
           <p className="qp-result-thanks-sub">
             Thank you for participating in the assessment conducted by
-            <strong> Mandi Hariyanna Academy, Mandi Harish Foundation</strong>.
+            <strong> M H Foundation, M H Foundation</strong>.
             We appreciate your time and effort. Best of luck!
           </p>
         </div>
@@ -381,7 +381,7 @@ export default function QuizPage() {
           <div className="qp-brand">
             <div className="qp-brand-logo">M</div>
             <div>
-              <div className="qp-brand-title">Mandi Hariyanna Academy</div>
+              <div className="qp-brand-title">M H Foundation</div>
               <div className="qp-brand-welcome">Welcome, <strong>{user?.name}</strong></div>
             </div>
           </div>

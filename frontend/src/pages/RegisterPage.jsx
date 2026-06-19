@@ -206,8 +206,8 @@ export default function RegisterPage() {
           <div className="rp-brand">
             <div className="rp-brand-logo" aria-label="MHA Logo">M</div>
             <div>
-              <div className="rp-brand-name">Mandi Hariyanna Academy</div>
-              <div className="rp-brand-sub">Mandi Harish Foundation®</div>
+              <div className="rp-brand-name">M H Foundation</div>
+              <div className="rp-brand-sub">M H Foundation®</div>
             </div>
           </div>
 

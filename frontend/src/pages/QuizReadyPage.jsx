@@ -8,7 +8,7 @@ const SECTIONS_DISPLAY = [
   { name:"English",           icon:"📝", count:20, color:"#0891B2", bg:"#ECFEFF" },
 ];
 
-const TNC_TEXT = `TERMS & CONDITIONS — Mandi Hariyanna Academy Online Assessment
+const TNC_TEXT = `TERMS & CONDITIONS — M H Foundation Online Assessment
 
 1. ELIGIBILITY
    This quiz is intended for registered candidates only. Each candidate may attempt the quiz only once.
@@ -26,7 +26,7 @@ const TNC_TEXT = `TERMS & CONDITIONS — Mandi Hariyanna Academy Online Assessme
    You must have a stable internet connection. Use a laptop or desktop for best experience. Mobile devices are not recommended.
 
 6. RESULTS
-   Results will be announced by Mandi Hariyanna Academy through official channels. The academy's decision regarding scores and results shall be final and binding.
+   Results will be announced by M H Foundation through official channels. The academy's decision regarding scores and results shall be final and binding.
 
 7. PRIVACY
    Your personal information submitted during registration will be used solely for the purpose of this assessment. It will not be shared with third parties.
@@ -40,7 +40,7 @@ const TNC_TEXT = `TERMS & CONDITIONS — Mandi Hariyanna Academy Online Assessme
 10. ACCEPTANCE
     By clicking "I Agree", you confirm that you have read, understood, and agree to abide by all the above terms and conditions.
 
-— Mandi Harish Foundation®`;
+— M H Foundation®`;
 
 function TNCModal({ onClose }) {
   return (
@@ -99,8 +99,8 @@ export default function QuizReadyPage() {
         <div className="ready-brand">
           <div className="ready-logo">M</div>
           <div>
-            <div className="ready-brand-name">Mandi Hariyanna Academy</div>
-            <div className="ready-brand-sub">Mandi Harish Foundation®</div>
+            <div className="ready-brand-name">M H Foundation</div>
+            <div className="ready-brand-sub">M H Foundation®</div>
           </div>
         </div>
       </header>

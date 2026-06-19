@@ -47,7 +47,7 @@ services:
       - key: EMAIL_PASS
         sync: false      # Gmail App Password / provider SMTP key
       - key: EMAIL_FROM
-        sync: false      # "MH Academy <no-reply@yourdomain.com>"
+        sync: false      # "M H Foundation <no-reply@yourdomain.com>"
       - key: EMAIL_BATCH_SIZE
         value: 25
       - key: EMAIL_MAX_ATTEMPTS
