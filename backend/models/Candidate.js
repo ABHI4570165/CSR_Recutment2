@@ -55,10 +55,21 @@ const violationsSchema = new mongoose.Schema({
 const candidateSchema = new mongoose.Schema({
   assessmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Assessment", required: true, index: true },
 
-  // Identity (from CSV / Excel / manual entry)
+  // Identity (from CSV / Excel / manual entry, or walk-in registration form)
   name:    { type: String, required: true, trim: true },
   email:   { type: String, required: true, lowercase: true, trim: true, index: true },
   college: { type: String, required: true, trim: true, index: true },
+
+  // Where this candidate came from (Phase 12)
+  candidateSource: { type: String, enum: ["PRE_REGISTERED", "WALK_IN"], default: "PRE_REGISTERED", index: true },
+
+  // Walk-in demographics (optional — only collected at the /test portal)
+  usn:      { type: String, trim: true },
+  phone:    { type: String, trim: true },
+  gender:   { type: String, trim: true },
+  dob:      { type: String, trim: true },
+  aadhaar:  { type: String, trim: true },
+  location: { type: String, trim: true },
 
   // Secure access
   token:          { type: String, required: true, unique: true, index: true }, // non-guessable URL token

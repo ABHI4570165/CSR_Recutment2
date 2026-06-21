@@ -46,8 +46,34 @@ const assessmentSchema = new mongoose.Schema({
     default: "immediately",
   },
   linkSendAt: { type: Date },       // resolved send time (computed from option, or custom value)
+
+  // ── V3: drive type, lifecycle status, walk-in capacity (all additive) ───────
+  driveType: { type: String, enum: ["PRE_REGISTERED", "WALK_IN"], default: "PRE_REGISTERED", index: true },
+  status:    { type: String, enum: ["DRAFT", "ACTIVE", "COMPLETED", "ARCHIVED"], default: "ACTIVE", index: true },
+  college:   { type: String, trim: true, default: "" },          // optional drive-level college label
+  cutoff:    { type: Number, default: null },                    // selection cutoff (derived "selected" = score >= cutoff)
+
+  // Walk-in only
+  testCode:      { type: String, unique: true, sparse: true, index: true }, // e.g. "MH001" (global, never reused)
+  maxCandidates: { type: Number, default: null },               // capacity; null = unlimited
+  walkInCount:   { type: Number, default: 0 },                   // atomic registration counter (capacity guard)
+
+  // Capacity planning hint (Phase 20)
+  expectedCandidates: { type: Number, default: null },
+
+  // Per-drive security toggles (Phase 8) — all on by default
+  security: {
+    desktopOnly:          { type: Boolean, default: true },
+    fullscreenEnforcement:{ type: Boolean, default: true },
+    cameraMonitoring:     { type: Boolean, default: true },
+    faceVerification:     { type: Boolean, default: true },
+    multipleFaceDetection:{ type: Boolean, default: true },
+    tabSwitchDetection:   { type: Boolean, default: true },
+    violationTracking:    { type: Boolean, default: true },
+  },
 }, { timestamps: true });
 
 assessmentSchema.index({ isActive: 1, createdAt: -1 });
+assessmentSchema.index({ status: 1, driveType: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Assessment", assessmentSchema);

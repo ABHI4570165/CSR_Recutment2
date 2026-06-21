@@ -9,6 +9,7 @@ const QuizReadyPage  = lazy(() => import("./pages/QuizReadyPage"));
 const QuizPage       = lazy(() => import("./pages/QuizPage"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AssessmentPage = lazy(() => import("./pages/AssessmentPage"));
+const WalkInPortal   = lazy(() => import("./pages/WalkInPortal"));
 
 const Loading = () => (
   <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6b7280" }}>
@@ -21,14 +22,21 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <BrowserRouter>
       <Suspense fallback={<Loading />}>
         <Routes>
-          {/* Legacy public-registration quiz flow (unchanged) */}
-          <Route path="/"      element={<RegisterPage />} />
-          <Route path="/ready" element={<QuizReadyPage />} />
-          <Route path="/quiz"  element={<QuizPage />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          {/* Campus recruitment — invitation-based candidate flow */}
-          <Route path="/assessment/:token" element={<AssessmentPage />} />
-          <Route path="*"      element={<Navigate to="/" replace />} />
+          {/* Root = Admin login/dashboard (students never land on registration) */}
+          <Route path="/"        element={<AdminDashboard />} />
+          <Route path="/admin"   element={<AdminDashboard />} />
+
+          {/* Public candidate flows */}
+          <Route path="/test"               element={<WalkInPortal />} />     {/* walk-in test-code portal */}
+          <Route path="/assessment/:token"  element={<AssessmentPage />} />    {/* invitation links (kept) */}
+          <Route path="/candidate/:token"   element={<AssessmentPage />} />    {/* alias for pre-registered */}
+
+          {/* Legacy public-registration quiz (kept, off the root route) */}
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/ready"    element={<QuizReadyPage />} />
+          <Route path="/quiz"     element={<QuizPage />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

@@ -187,9 +187,11 @@ export default function AssessmentPage() {
   const multiStreakRef = useRef(0);
   const noFaceStreakRef = useRef(0);
   const multiCooldownRef = useRef(0);
+  const secRef = useRef({});   // live per-drive security toggles
 
   const [nowTick, setNowTick] = useState(Date.now());
 
+  useEffect(() => { if (info?.security) secRef.current = info.security; }, [info]);
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { reviewRef.current = review; }, [review]);
   useEffect(() => { visitedRef.current = visited; }, [visited]);
@@ -309,20 +311,33 @@ export default function AssessmentPage() {
   }, [finishVerification]);
 
   const beginScanning = useCallback(async () => {
+    const sec = secRef.current || {};
+    const wantCamera = sec.cameraMonitoring !== false || sec.faceVerification !== false;
     setVerifyStatus("loading"); setVerifyMsg(""); setFaceCount(null); okFramesRef.current = 0;
-    // Ensure camera is live
+
+    // Camera disabled for this drive → skip straight to the paper.
+    if (!wantCamera) {
+      setVerifyStatus("verified");
+      await new Promise(r => setTimeout(r, 500));
+      await loadPaper();
+      return;
+    }
     let ok = !!streamRef.current;
     if (!ok) ok = await startCamera();
     if (!ok) { setVerifyStatus("nocam"); return; }
-    // Load the detector (CDN/WASM/model). Face verification is MANDATORY:
-    // if it cannot initialize, the assessment stays locked — no degraded bypass.
+
+    // Face verification disabled → camera on (monitoring) but no face gate.
+    if (sec.faceVerification === false) {
+      setVerifyStatus("verified");
+      await new Promise(r => setTimeout(r, 700));
+      await loadPaper();
+      return;
+    }
+    // Face verification ON & MANDATORY — if the detector can't init, stay locked.
     let detector = null;
     try { detector = await loadFaceDetector(); } catch { detector = null; }
     detectorRef.current = detector;
-    if (!detector) {                       // CDN/model/WASM unavailable → LOCK (do not start)
-      setVerifyStatus("detectorfail");
-      return;
-    }
+    if (!detector) { setVerifyStatus("detectorfail"); return; }
     setVerifyStatus("scanning");
     stopFaceTimers();
     detectTimerRef.current = setInterval(verifyTick, 300);
@@ -342,6 +357,8 @@ export default function AssessmentPage() {
    * Rules page, so no prompt interrupts/drops fullscreen here.
    */
   const enterAndStart = useCallback(() => {
+    // Fullscreen disabled for this drive → go straight to the gate (no FS gesture needed).
+    if ((secRef.current || {}).fullscreenEnforcement === false) { setGateMsg(""); runGateAfterFullscreen(); return; }
     const fsPromise = requestFullscreen();   // FIRST — inside the click gesture
     const failMsg = resumeMode
       ? "Fullscreen mode is required to continue this assessment."
@@ -379,9 +396,10 @@ export default function AssessmentPage() {
   }, [backupKey]);
 
   const loadPaper = useCallback(async () => {
-    // HARD GATE: the quiz is entered ONLY from here, and ONLY while in fullscreen.
-    // If fullscreen was dropped during the camera/face gate, abort to the Rules page.
-    if (!isFullscreen()) {
+    const fsRequired = (secRef.current || {}).fullscreenEnforcement !== false;
+    // HARD GATE: the quiz is entered ONLY from here, and ONLY while in fullscreen
+    // (unless this drive has fullscreen enforcement disabled).
+    if (fsRequired && !isFullscreen()) {
       stopFaceTimers();
       setGateMsg(resumeMode
         ? "Fullscreen mode is required to continue this assessment."
@@ -408,7 +426,7 @@ export default function AssessmentPage() {
       violRef.current = { fullscreenExits: v.fullscreenExits || 0, tabSwitches: v.tabSwitches || 0, focusLoss: v.focusLoss || 0, multipleFaces: v.multipleFaces || 0 };
       setViolCount((v.fullscreenExits || 0) + (v.tabSwitches || 0) + (v.focusLoss || 0) + (v.multipleFaces || 0));
       // Re-verify fullscreen after the network round-trip (it could have been dropped meanwhile).
-      if (!isFullscreen()) {
+      if (fsRequired && !isFullscreen()) {
         stopFaceTimers();
         setGateMsg(resumeMode
           ? "Fullscreen mode is required to continue this assessment."
@@ -495,13 +513,14 @@ export default function AssessmentPage() {
 
   useEffect(() => {
     if (phase !== "quiz") return;
+    const sec = secRef.current || {};
+    const tabOn = sec.tabSwitchDetection !== false;
+    const fsOn  = sec.fullscreenEnforcement !== false;
     const onVis = () => { if (document.hidden) recordViolation("tabSwitches", "tab"); };
     const onBlur = () => recordViolation("focusLoss", "tab");
     const onFs = () => { if (!isFullscreen() && !submitted.current) recordViolation("fullscreenExits", "fullscreen"); };
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("blur", onBlur);
-    document.addEventListener("fullscreenchange", onFs);
-    document.addEventListener("webkitfullscreenchange", onFs);
+    if (tabOn) { document.addEventListener("visibilitychange", onVis); window.addEventListener("blur", onBlur); }
+    if (fsOn)  { document.addEventListener("fullscreenchange", onFs); document.addEventListener("webkitfullscreenchange", onFs); }
     return () => {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("blur", onBlur);
@@ -512,7 +531,8 @@ export default function AssessmentPage() {
 
   /* ── Continuous face monitoring during the assessment ─────────────────────── */
   useEffect(() => {
-    if (phase !== "quiz" || !detectorRef.current) return;  // detector is always present in quiz (mandatory gate); defensive guard
+    if (phase !== "quiz" || !detectorRef.current) return;  // no detector → nothing to monitor
+    if ((secRef.current || {}).multipleFaceDetection === false) return; // disabled for this drive
     multiStreakRef.current = 0; noFaceStreakRef.current = 0; multiCooldownRef.current = 0;
     monitorTimerRef.current = setInterval(() => {
       if (submitted.current) return;
@@ -608,8 +628,8 @@ export default function AssessmentPage() {
   }, [questions, answers, review]);
 
   /* ── Renders ──────────────────────────────────────────────────────────────── */
-  // Mobile / tablet are blocked outright — proctored assessment needs a desktop.
-  if (isMobile) return (
+  // Mobile / tablet blocked — unless this drive disables the desktop-only rule.
+  if (isMobile && (info?.security?.desktopOnly !== false)) return (
     <CenterCard icon="💻" title="Desktop or Laptop Required"
       message="This assessment must be taken on a laptop or desktop computer. Please switch to a desktop browser and reopen your assessment link." />
   );

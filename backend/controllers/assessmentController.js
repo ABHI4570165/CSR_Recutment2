@@ -2,8 +2,15 @@ const mongoose   = require("mongoose");
 const Assessment = require("../models/Assessment");
 const Candidate  = require("../models/Candidate");
 const Question   = require("../models/Question");
+const Counter    = require("../models/Counter");
 const { generateUniqueToken } = require("../utils/tokens");
 const { buildLink, queueThankYou, queueDisqualification, flushNow } = require("../utils/emailQueue");
+
+// Generate the next global walk-in test code, e.g. MH001 (never reused).
+async function nextTestCode() {
+  const n = await Counter.next("testCode");
+  return `MH${String(n).padStart(3, "0")}`;
+}
 
 const shuffle = (a) => {
   const b = [...a];
@@ -43,6 +50,9 @@ exports.createAssessment = async (req, res) => {
       return res.status(400).json({ success: false, message: "Assessment name is required." });
     }
     const b = req.body || {};
+    const driveType = b.driveType === "WALK_IN" ? "WALK_IN" : "PRE_REGISTERED";
+    // Walk-in drives get a unique global test code.
+    const testCode = driveType === "WALK_IN" ? await nextTestCode() : undefined;
     const doc = await Assessment.create({
       name: String(name).trim(),
       description: description || "",
@@ -58,6 +68,15 @@ exports.createAssessment = async (req, res) => {
       ...(b.endAt ? { endAt: toDate(b.endAt) } : {}),
       ...(b.linkSendOption ? { linkSendOption: b.linkSendOption } : {}),
       ...(b.linkSendAt ? { linkSendAt: toDate(b.linkSendAt) } : {}),
+      // V3 fields
+      driveType,
+      ...(testCode ? { testCode } : {}),
+      ...(b.status && ["DRAFT","ACTIVE","COMPLETED","ARCHIVED"].includes(b.status) ? { status: b.status } : {}),
+      ...(b.college ? { college: String(b.college).trim() } : {}),
+      ...(b.cutoff != null && b.cutoff !== "" ? { cutoff: parseInt(b.cutoff) } : {}),
+      ...(b.maxCandidates != null && b.maxCandidates !== "" ? { maxCandidates: parseInt(b.maxCandidates) } : {}),
+      ...(b.expectedCandidates != null && b.expectedCandidates !== "" ? { expectedCandidates: parseInt(b.expectedCandidates) } : {}),
+      ...(b.security && typeof b.security === "object" ? { security: b.security } : {}),
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
@@ -102,10 +121,15 @@ exports.getAssessment = async (req, res) => {
 exports.updateAssessment = async (req, res) => {
   try {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
-      "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS];
+      "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
+      // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
+      "status", "college", "cutoff", "maxCandidates", "expectedCandidates", "security"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
+    ["durationMinutes", "passingScore", "cutoff", "maxCandidates", "expectedCandidates"].forEach(k => {
+      if (update[k] !== undefined && update[k] !== null && update[k] !== "") update[k] = parseInt(update[k]);
+    });
     const a = await Assessment.findByIdAndUpdate(req.params.id, { $set: update }, { new: true });
     if (!a) return res.status(404).json({ success: false, message: "Assessment not found." });
     res.json({ success: true, data: a });
@@ -274,12 +298,13 @@ exports.listCandidates = async (req, res) => {
   try {
     const page   = Math.max(1, parseInt(req.query.page) || 1);
     const limit  = Math.min(500, parseInt(req.query.limit) || 20);
-    const { assessmentId, college, status, search } = req.query;
+    const { assessmentId, college, status, search, source } = req.query;
 
     const filter = {};
     if (assessmentId) filter.assessmentId = assessmentId;
     if (college) filter.college = college;
     if (status) filter.status = status;
+    if (source) filter.candidateSource = source;
     if (search) {
       const re = new RegExp(escapeRegex(String(search).trim()), "i");
       filter.$or = [{ name: re }, { email: re }, { college: re }];
@@ -287,7 +312,7 @@ exports.listCandidates = async (req, res) => {
 
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
-        .select("name email college status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
+        .select("name email college candidateSource usn phone gender dob aadhaar location status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
     ]);
@@ -358,6 +383,67 @@ exports.candidateStats = async (req, res) => {
   }
 };
 
+// Campus overview metrics + recent activity for the admin Dashboard tab.
+exports.overviewStats = async (req, res) => {
+  try {
+    const [driveAgg, candAgg, selectedAgg, recentCands, recentDrives] = await Promise.all([
+      Assessment.aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
+      Candidate.aggregate([{ $group: {
+        _id: null,
+        total: { $sum: 1 },
+        walkIn: { $sum: { $cond: [{ $eq: ["$candidateSource", "WALK_IN"] }, 1, 0] } },
+        preReg: { $sum: { $cond: [{ $ne: ["$candidateSource", "WALK_IN"] }, 1, 0] } },
+        completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+        disqualified: { $sum: { $cond: [{ $eq: ["$status", "disqualified"] }, 1, 0] } },
+        avgScore: { $avg: "$score" },
+      } }]),
+      // Selected = completed AND score >= the drive's cutoff (cutoff set)
+      Candidate.aggregate([
+        { $match: { status: "completed", score: { $ne: null } } },
+        { $lookup: { from: "assessments", localField: "assessmentId", foreignField: "_id", as: "d" } },
+        { $unwind: "$d" },
+        { $match: { "d.cutoff": { $ne: null } , $expr: { $gte: ["$score", "$d.cutoff"] } } },
+        { $count: "n" },
+      ]),
+      Candidate.find().sort({ updatedAt: -1 }).limit(8)
+        .select("name college status candidateSource completedAt createdAt updatedAt").lean(),
+      Assessment.find().sort({ createdAt: -1 }).limit(5)
+        .select("name driveType status testCode createdAt").lean(),
+    ]);
+
+    const driveCounts = { DRAFT: 0, ACTIVE: 0, COMPLETED: 0, ARCHIVED: 0 };
+    driveAgg.forEach(d => { if (d._id) driveCounts[d._id] = d.n; });
+    const totalDrives = Object.values(driveCounts).reduce((a, b) => a + b, 0);
+    const c = candAgg[0] || {};
+
+    const activity = [
+      ...recentCands.map(x => ({
+        type: x.status === "completed" ? "completed" : x.status === "disqualified" ? "disqualified" : "registered",
+        text: `${x.name} (${x.college}) — ${x.status}`,
+        source: x.candidateSource, at: x.completedAt || x.updatedAt || x.createdAt,
+      })),
+      ...recentDrives.map(x => ({
+        type: "drive", text: `Drive created: ${x.name}${x.testCode ? ` [${x.testCode}]` : ""}`,
+        source: x.driveType, at: x.createdAt,
+      })),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 10);
+
+    res.json({ success: true, data: {
+      drives: { total: totalDrives, active: driveCounts.ACTIVE, archived: driveCounts.ARCHIVED, draft: driveCounts.DRAFT, completed: driveCounts.COMPLETED },
+      candidates: {
+        total: c.total || 0, walkIn: c.walkIn || 0, preRegistered: c.preReg || 0,
+        completed: c.completed || 0, disqualified: c.disqualified || 0,
+        selected: selectedAgg[0]?.n || 0,
+        avgScore: c.avgScore ? Math.round(c.avgScore * 10) / 10 : 0,
+      },
+      recentActivity: activity,
+    }});
+  } catch (err) {
+    console.error("overviewStats:", err);
+    res.status(500).json({ success: false, message: "Failed to load overview." });
+  }
+};
+
 exports.listColleges = async (req, res) => {
   try {
     const filter = req.query.assessmentId ? { assessmentId: req.query.assessmentId } : {};
@@ -406,6 +492,7 @@ exports.deleteCandidate = async (req, res) => {
 function now() { return Date.now(); }
 
 function publicCandidateView(c, assessment) {
+  const s = assessment.security || {};
   return {
     name: c.name,
     college: c.college,
@@ -413,6 +500,16 @@ function publicCandidateView(c, assessment) {
     durationMinutes: assessment.durationMinutes,
     startAt: assessment.startAt || null,
     endAt:   assessment.endAt || null,
+    // Per-drive security toggles (default ON if unset) — enforced by the engine.
+    security: {
+      desktopOnly:           s.desktopOnly !== false,
+      fullscreenEnforcement: s.fullscreenEnforcement !== false,
+      cameraMonitoring:      s.cameraMonitoring !== false,
+      faceVerification:      s.faceVerification !== false,
+      multipleFaceDetection: s.multipleFaceDetection !== false,
+      tabSwitchDetection:    s.tabSwitchDetection !== false,
+      violationTracking:     s.violationTracking !== false,
+    },
   };
 }
 

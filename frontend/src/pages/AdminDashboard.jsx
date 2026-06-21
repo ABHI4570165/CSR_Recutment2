@@ -4,9 +4,10 @@ import {
   adminLogin, clearAdminToken, fetchStats, fetchUsers, fetchAttempts,
   fetchSettings, updateSettings, fetchQuestions, addQuestion, updateQuestion,
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
-  fetchAssessments, createAssessment, deleteAssessment,
+  fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, testEmail
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, testEmail,
+  getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
 
@@ -500,6 +501,34 @@ const LINK_SEND_OPTIONS = [
   { value:"custom",      label:"Custom Date & Time" },
 ];
 
+const SECURITY_KEYS = [
+  ["desktopOnly",           "Desktop Only"],
+  ["fullscreenEnforcement", "Fullscreen Enforcement"],
+  ["cameraMonitoring",      "Camera Monitoring"],
+  ["faceVerification",      "Face Verification"],
+  ["multipleFaceDetection", "Multiple Face Detection"],
+  ["tabSwitchDetection",    "Tab Switch Detection"],
+  ["violationTracking",     "Violation Tracking"],
+];
+const DEFAULT_SECURITY = SECURITY_KEYS.reduce((o, [k]) => (o[k] = true, o), {});
+
+function SecurityToggles({ value, onChange }) {
+  const v = value || DEFAULT_SECURITY;
+  return (
+    <div className="ad-field" style={{marginTop:10}}>
+      <label className="ad-label">Assessment Security (all on by default)</label>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 14px",marginTop:4}}>
+        {SECURITY_KEYS.map(([k,label])=>(
+          <label key={k} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,cursor:"pointer"}}>
+            <input type="checkbox" checked={v[k]!==false} onChange={e=>onChange({...v,[k]:e.target.checked})}/>
+            {label}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Combine a yyyy-mm-dd date input and HH:MM time input into an ISO datetime.
 function combineDateTime(dateStr, timeStr) {
   if (!dateStr || !timeStr) return undefined;
@@ -511,6 +540,8 @@ function toLocalInput(d){ if(!d) return ""; const dt=new Date(d); const p=n=>Str
 
 function CreateDriveModal({ sections, onClose, onCreated }) {
   const [name,setName]=useState("");
+  const [driveType,setDriveType]=useState("PRE_REGISTERED");
+  const [maxCandidates,setMaxCandidates]=useState("");
   const [duration,setDuration]=useState(40);
   const [passing,setPassing]=useState(30);
   const [date,setDate]=useState("");
@@ -519,6 +550,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
   const [linkSendOption,setLinkSendOption]=useState("30min");
   const [linkSendCustom,setLinkSendCustom]=useState("");
   const [secs,setSecs]=useState(()=>(sections||[]).map(s=>({...s,include:true})));
+  const [security,setSecurity]=useState({...DEFAULT_SECURITY});
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
@@ -534,11 +566,13 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     setSaving(true); setErr("");
     try{
       await createAssessment({
-        name:name.trim(), durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
+        name:name.trim(), driveType, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
         linkSendAt: linkSendOption==="custom" ? new Date(linkSendCustom).toISOString() : undefined,
+        ...(driveType==="WALK_IN" && maxCandidates ? { maxCandidates:Number(maxCandidates) } : {}),
+        security,
       });
       onCreated();
     }catch(e){ setErr(e.message||"Failed to create."); }
@@ -551,6 +585,18 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
         <h3 className="ad-modal-title">New Campus Drive</h3>
         <div className="ad-field"><label className="ad-label">Drive / Assessment Name</label>
           <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
+        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <div className="ad-field" style={{flex:1,minWidth:160}}><label className="ad-label">Drive Type</label>
+            <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
+              <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
+              <option value="WALK_IN">Walk-In (test code at /test)</option>
+            </select></div>
+          {driveType==="WALK_IN" && (
+            <div className="ad-field" style={{width:170}}><label className="ad-label">Max Candidates</label>
+              <input type="number" className="ad-input" value={maxCandidates} min={1} placeholder="e.g. 100" onChange={e=>setMaxCandidates(e.target.value)}/>
+              <span className="ad-hint">A unique test code is generated on save.</span></div>
+          )}
+        </div>
         <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
           <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Duration (min)</label>
             <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
@@ -587,10 +633,70 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
             {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
           </div>
         </div>
+        <SecurityToggles value={security} onChange={setSecurity}/>
         {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
           <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?<><Spinner/>Creating…</>:"Create Drive"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditDriveModal({ drive, onClose, onSaved }) {
+  const [name,setName]=useState(drive.name||"");
+  const [status,setStatus]=useState(drive.status||"ACTIVE");
+  const [duration,setDuration]=useState(drive.durationMinutes||40);
+  const [cutoff,setCutoff]=useState(drive.cutoff??"");
+  const [maxCandidates,setMaxCandidates]=useState(drive.maxCandidates??"");
+  const [security,setSecurity]=useState({...DEFAULT_SECURITY,...(drive.security||{})});
+  const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
+
+  const save=async()=>{
+    if(!name.trim()){ setErr("Drive name is required."); return; }
+    setSaving(true); setErr("");
+    try{
+      await updateAssessment(drive._id,{
+        name:name.trim(), status, durationMinutes:Number(duration)||40,
+        cutoff: cutoff===""?null:Number(cutoff),
+        ...(drive.driveType==="WALK_IN" ? { maxCandidates: maxCandidates===""?null:Number(maxCandidates) } : {}),
+        security,
+      });
+      onSaved();
+    }catch(e){ setErr(e.message||"Failed to save."); }
+    finally{ setSaving(false); }
+  };
+
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <div className="ad-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:560,maxHeight:"88vh",overflowY:"auto"}}>
+        <h3 className="ad-modal-title">Edit Drive {drive.testCode?`· ${drive.testCode}`:""}</h3>
+        <div className="ad-field"><label className="ad-label">Drive Name</label>
+          <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}}/></div>
+        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Status</label>
+            <select className="ad-input ad-select" value={status} onChange={e=>setStatus(e.target.value)}>
+              {["DRAFT","ACTIVE","COMPLETED","ARCHIVED"].map(s=><option key={s} value={s}>{s}</option>)}
+            </select></div>
+          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Duration (min)</label>
+            <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Cutoff (selection)</label>
+            <input type="number" className="ad-input" value={cutoff} min={0} placeholder="e.g. 30" onChange={e=>setCutoff(e.target.value)}/>
+            <span className="ad-hint">Candidates scoring ≥ cutoff count as Selected (recalculated live).</span></div>
+          {drive.driveType==="WALK_IN" && (
+            <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Max Candidates</label>
+              <input type="number" className="ad-input" value={maxCandidates} min={1} onChange={e=>setMaxCandidates(e.target.value)}/>
+              <span className="ad-hint">{drive.walkInCount||0} registered so far.</span></div>
+          )}
+        </div>
+        <SecurityToggles value={security} onChange={setSecurity}/>
+        {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
+        <div style={{display:"flex",gap:10,marginTop:16}}>
+          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
+          <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?<><Spinner/>Saving…</>:"Save Changes"}</button>
         </div>
       </div>
     </div>
@@ -692,8 +798,10 @@ function DrivesTab() {
   const [colleges,setColleges]=useState([]);
   const [cands,setCands]=useState([]);
   const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
-  const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [search,setSearch]=useState("");
+  const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [fSource,setFSource]=useState(""); const [search,setSearch]=useState("");
   const [showCreate,setShowCreate]=useState(false); const [showUpload,setShowUpload]=useState(false);
+  const [editDrive,setEditDrive]=useState(null);
+  const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
   const [toast,setToast]=useState(null);   // {type:'success'|'error', title, lines:[]}
@@ -708,12 +816,12 @@ function DrivesTab() {
     try{
       const [s,c,cl]=await Promise.all([
         fetchCandidateStats({assessmentId}),
-        fetchCandidates({assessmentId,page,limit:20,college:fCollege||undefined,status:fStatus||undefined,search:search||undefined}),
+        fetchCandidates({assessmentId,page,limit:20,college:fCollege||undefined,status:fStatus||undefined,source:fSource||undefined,search:search||undefined}),
         fetchDriveColleges({assessmentId}),
       ]);
       setStats(s.data.data); setCands(c.data.data); setPag(c.data.pagination); setColleges(cl.data.data);
     }catch{} finally{ setLoading(false); }
-  },[page,fCollege,fStatus,search]);
+  },[page,fCollege,fStatus,fSource,search]);
 
   useEffect(()=>{ if(sel) loadDriveData(sel._id); },[sel,loadDriveData]);
 
@@ -766,13 +874,35 @@ function DrivesTab() {
     try{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); }catch(e){alert(e.message);}
   };
   const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>alert("Link copied"),()=>{}); };
-  const exportCands=async()=>{
+
+  const archiveDrive=async(d)=>{
+    const to = d.status==="ARCHIVED" ? "ACTIVE" : "ARCHIVED";
+    try{ await updateAssessment(d._id,{status:to}); if(sel?._id===d._id) setSel({...sel,status:to}); await loadDrives(); }
+    catch(e){ alert(e.message); }
+  };
+
+  // Build an .xlsx of a drive's candidates with the full V3 column set.
+  const exportDriveCandidates=async(drive, picks)=>{
     try{
-      const r=await fetchCandidates({assessmentId:sel._id,page:1,limit:9999,college:fCollege||undefined,status:fStatus||undefined});
-      const ws=XLSX.utils.json_to_sheet(r.data.data.map(c=>({Name:c.name,Email:c.email,College:c.college,Status:c.status,EmailStatus:c.emailStatus,Score:c.score??"-",TotalMarks:c.totalMarks??"-",Passed:c.passed==null?"-":c.passed?"Yes":"No",Violations:c.violations?.total||0,Completed:fmtDate(c.completedAt)})));
-      const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Candidates"); XLSX.writeFile(wb,`${sel.name.replace(/\s+/g,"_")}_candidates.xlsx`);
+      const r=await fetchCandidates({assessmentId:drive._id,page:1,limit:99999});
+      let rows=r.data.data;
+      if(picks && picks.size) rows=rows.filter(c=>picks.has(c._id));
+      const cutoff=drive.cutoff;
+      const ws=XLSX.utils.json_to_sheet(rows.map(c=>({
+        Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Gender:c.gender||"", DOB:c.dob||"",
+        Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
+        Drive:drive.name, "Drive Type":drive.driveType, Source:c.candidateSource||"PRE_REGISTERED",
+        Score:c.score??"-", "Total":c.totalMarks??"-",
+        Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
+        Status:c.status, Violations:c.violations?.total||0,
+        Selected:(cutoff!=null&&c.score!=null)?(c.score>=cutoff?"Yes":"No"):"-",
+        Completed:fmtDate(c.completedAt),
+      })));
+      const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Candidates");
+      XLSX.writeFile(wb,`${drive.name.replace(/\s+/g,"_")}_candidates.xlsx`);
     }catch(e){alert(e.message);}
   };
+  const exportCands=()=>exportDriveCandidates(sel, picked.size?picked:null);
 
   const togglePick=(id)=>setPicked(p=>{const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n;});
 
@@ -791,28 +921,47 @@ function DrivesTab() {
     <div>
       {toastEl}
       {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={()=>{setShowCreate(false);loadDrives();}}/>}
+      {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
         <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>
       </div>
-      <p style={{fontSize:13,color:"var(--text-3)",marginBottom:18}}>Invitation-based assessments. Upload candidates, schedule emails, and track results by college — separate from the legacy public-registration data.</p>
-      {drives.length===0 ? <div className="ad-empty">No drives yet. Click "New Drive" to create one.</div> :
+      <div className="ad-toolbar" style={{marginBottom:14}}>
+        {[["active","Active"],["archived","Archived"],["all","All"]].map(([v,l])=>(
+          <button key={v} className={`ad-btn ad-btn--sm ${driveFilter===v?"ad-btn--primary":"ad-btn--outline"}`} onClick={()=>setDriveFilter(v)}>{l}</button>
+        ))}
+      </div>
+      {(()=>{ const filtered=drives.filter(d=>driveFilter==="all"?true:driveFilter==="archived"?d.status==="ARCHIVED":d.status!=="ARCHIVED");
+        return filtered.length===0 ? <div className="ad-empty">No {driveFilter==="all"?"":driveFilter} drives.</div> :
         <div className="ad-stats-grid">
-          {drives.map(d=>(
-            <div key={d._id} className="ad-stat-card" style={{borderTopColor:"#1a56db",cursor:"pointer",textAlign:"left",alignItems:"flex-start"}} onClick={()=>openDrive(d)}>
+          {filtered.map(d=>(
+            <div key={d._id} className="ad-stat-card" style={{borderTopColor:d.driveType==="WALK_IN"?"#7C3AED":"#1a56db",cursor:"pointer",textAlign:"left",alignItems:"flex-start"}} onClick={()=>openDrive(d)}>
+              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
+                <span className="ad-badge" style={{background:(d.driveType==="WALK_IN"?"#7C3AED":"#1a56db")+"22",color:d.driveType==="WALK_IN"?"#7C3AED":"#1a56db"}}>{d.driveType==="WALK_IN"?"WALK-IN":"PRE-REG"}</span>
+                {d.status && d.status!=="ACTIVE" && <span className="ad-badge ad-badge--gray">{d.status}</span>}
+              </div>
               <div style={{fontSize:15,fontWeight:800,color:"var(--text-1)",marginBottom:6}}>{d.name}</div>
+              {d.driveType==="WALK_IN" && d.testCode && (
+                <div style={{fontSize:13,fontWeight:800,color:"#7C3AED",marginBottom:4,letterSpacing:1}}>Test Code: {d.testCode}
+                  {d.maxCandidates!=null && <span style={{fontWeight:600,color:"var(--text-3)"}}> · {d.walkInCount||0}/{d.maxCandidates}</span>}
+                </div>
+              )}
               <div style={{fontSize:12,color:"var(--text-3)"}}>{d.durationMinutes} min · {d.candidateCount} candidates · {d.completedCount} completed</div>
               <div style={{fontSize:11,color:"var(--text-3)",marginTop:6,lineHeight:1.6}}>
                 {d.startAt ? <>📅 {fmtDate(d.assessmentDate||d.startAt)} · ⏰ {fmtTimeOnly(d.startAt)}–{fmtTimeOnly(d.endAt)}<br/></> : <>Deadline: {fmtDate(d.deadline)}<br/></>}
-                {d.startAt && <>🔗 Link: {LINK_SEND_OPTIONS.find(o=>o.value===d.linkSendOption)?.label || "—"}</>}
+                {d.driveType!=="WALK_IN" && d.startAt && <>🔗 Link: {LINK_SEND_OPTIONS.find(o=>o.value===d.linkSendOption)?.label || "—"}</>}
               </div>
-              <div style={{display:"flex",gap:6,marginTop:10}}>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();openDrive(d);}}>Open</button>
+              {d.cutoff!=null && <div style={{fontSize:11,color:"#D97706",marginTop:4,fontWeight:600}}>Cutoff: {d.cutoff}</div>}
+              <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();openDrive(d);}}>View</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();setEditDrive(d);}}>Edit</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();exportDriveCandidates(d);}}>Export</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();archiveDrive(d);}}>{d.status==="ARCHIVED"?"Unarchive":"Archive"}</button>
                 <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={e=>{e.stopPropagation();delDrive(d);}}>Delete</button>
               </div>
             </div>
           ))}
-        </div>}
+        </div>; })()}
     </div>
   );
 
@@ -893,6 +1042,9 @@ function DrivesTab() {
         <select className="ad-select" value={fCollege} onChange={e=>{setFCollege(e.target.value);setPage(1);}}>
           <option value="">All Colleges</option>{colleges.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
+        <select className="ad-select" value={fSource} onChange={e=>{setFSource(e.target.value);setPage(1);}}>
+          <option value="">All Sources</option><option value="WALK_IN">Walk-In</option><option value="PRE_REGISTERED">Pre-Registered</option>
+        </select>
         <select className="ad-select" value={fStatus} onChange={e=>{setFStatus(e.target.value);setPage(1);}}>
           <option value="">All Status</option>{STATUS_META.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
@@ -911,15 +1063,17 @@ function DrivesTab() {
         {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
         :cands.length===0?<div className="ad-empty">No candidates yet. Click "Upload Candidates".</div>
         :<table className="ad-table">
-          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Status</th><th>Shortlist</th><th>Link</th><th>Score</th><th>Viol.</th><th>Link</th><th></th></tr></thead>
+          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Source</th><th>Status</th><th>Shortlist</th><th>Link</th><th>Score</th><th>Viol.</th><th>Link</th><th></th></tr></thead>
           <tbody>{cands.map((c,i)=>{
             const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
+            const walkIn=c.candidateSource==="WALK_IN";
             return (
               <tr key={c._id}>
                 <td><input type="checkbox" checked={picked.has(c._id)} onChange={()=>togglePick(c._id)}/></td>
                 <td className="ad-td-num">{(page-1)*20+i+1}</td>
                 <td><div className="ad-td-name"><div className="ad-avatar">{c.name.charAt(0)}</div>{c.name}</div></td>
                 <td className="ad-td-sm">{c.college}</td>
+                <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
                 <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
                 <td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>
                 <td className="ad-td-sm">{c.emailStatus}</td>
@@ -949,9 +1103,76 @@ const TABS = [
 ];
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
+// ── Assessment Active Mode banner (Render keep-awake) ──────────────────────────
+function ActiveModeBanner() {
+  const [st,setSt]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [warn,setWarn]=useState(false);
+  const hbRef=useRef(null);
+
+  const load=useCallback(async()=>{ try{const r=await getSystemStatus(); setSt(r.data.data);}catch{} },[]);
+  useEffect(()=>{ load(); const iv=setInterval(load,60000); return ()=>clearInterval(iv); },[load]);
+
+  // Heartbeat every 5 min while active (the external request keeps Render awake).
+  useEffect(()=>{
+    if(st?.activeMode){
+      sendHeartbeat().catch(()=>{});
+      hbRef.current=setInterval(()=>sendHeartbeat().catch(()=>{}),5*60*1000);
+      return ()=>clearInterval(hbRef.current);
+    }
+  },[st?.activeMode]);
+
+  // 10 PM warning: when within 15 min of auto-off and still active.
+  useEffect(()=>{
+    if(!st?.activeMode||!st?.autoOffAt){ setWarn(false); return; }
+    const check=()=>{ const off=new Date(st.autoOffAt).getTime(); const now=Date.now();
+      setWarn(now>=off-15*60*1000 && now<off); };
+    check(); const iv=setInterval(check,30000); return ()=>clearInterval(iv);
+  },[st?.activeMode,st?.autoOffAt]);
+
+  const toggle=async(payload)=>{ setBusy(true); try{const r=await setActiveMode(payload); setSt(r.data.data); if(!payload.on&&!payload.extend) setWarn(false); if(payload.extend) setWarn(false);}catch(e){alert(e.message);}finally{setBusy(false);} };
+
+  const active=st?.activeMode;
+  const fmt=d=>d?new Date(d).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}):"—";
+
+  return (
+    <>
+      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"8px 14px",borderRadius:10,marginBottom:12,
+        background:active?"#ecfdf5":"#f1f5f9",border:`1px solid ${active?"#a7f3d0":"#e2e8f0"}`}}>
+        <span style={{fontWeight:800,fontSize:13,color:active?"#065f46":"#475569"}}>
+          {active?"🟢 Assessment Mode Active — Backend Keep-Alive Running":"⚪ Assessment Mode Disabled — Backend May Sleep"}
+        </span>
+        {active && st && <span style={{fontSize:11.5,color:"#475569"}}>
+          Last ping {fmt(st.lastHeartbeat)} · Auto-off {fmt(st.autoOffAt)} · {st.memoryMB}MB
+        </span>}
+        <button className={`ad-btn ad-btn--sm ${active?"ad-btn--danger":"ad-btn--primary"}`} style={{marginLeft:"auto"}}
+          disabled={busy} onClick={()=>toggle({on:!active})}>
+          {busy?"…":active?"Turn Off":"Turn On Active Mode"}
+        </button>
+      </div>
+      {warn && (
+        <div className="ad-overlay">
+          <div className="ad-modal ad-modal--sm">
+            <h3 className="ad-modal-title">Assessment Active Mode is still enabled</h3>
+            <p style={{color:"var(--text-2)",fontSize:14,marginBottom:18}}>
+              Keeping the server active overnight may consume resources unnecessarily. Do you want to keep Assessment Mode active?
+              If you don't respond, it will turn off automatically.
+            </p>
+            <div style={{display:"flex",gap:10}}>
+              <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={()=>toggle({on:false})}>Turn Off Now</button>
+              <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={()=>toggle({extend:true})}>Keep Active 2 Hours</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Dashboard({ onLogout }) {
   const [tab,        setTab]       = useState("dashboard");
   const [stats,      setStats]     = useState(null);
+  const [overview,   setOverview]  = useState(null);
   const [users,      setUsers]     = useState([]);
   const [userPag,    setUserPag]   = useState({});
   const [userPage,   setUserPage]  = useState(1);
@@ -986,6 +1207,7 @@ function Dashboard({ onLogout }) {
   const [newSecErr,  setNewSecErr] = useState("");
 
   const loadStats = useCallback(async()=>{ try{const r=await fetchStats();setStats(r?.data?.data||r?.data||null);}catch{} },[]);
+  const loadOverview = useCallback(async()=>{ try{const r=await fetchOverview();setOverview(r.data.data);}catch{} },[]);
   const loadSections = useCallback(async()=>{
     try{
       const r=await fetchSections();
@@ -1017,7 +1239,7 @@ function Dashboard({ onLogout }) {
 
   useEffect(()=>{
     loadSections();
-    if(tab==="dashboard") loadStats();
+    if(tab==="dashboard") { loadOverview(); loadStats(); }
     if(tab==="students")  loadUsers();
     if(tab==="attempts")  loadAttempts();
     if(tab==="questions") { loadSections(); loadQuestions(); }
@@ -1091,6 +1313,8 @@ function Dashboard({ onLogout }) {
         <button className="ad-btn ad-btn--outline ad-btn--logout" onClick={onLogout}>Sign Out</button>
       </header>
 
+      <div style={{padding:"0 0"}}><ActiveModeBanner/></div>
+
       <nav className="ad-tabs">
         {TABS.map(t=>(
           <button key={t.id} className={`ad-tab ${tab===t.id?"ad-tab--active":""}`} onClick={()=>setTab(t.id)}>
@@ -1104,24 +1328,44 @@ function Dashboard({ onLogout }) {
         {tab==="dashboard" && (
           <div>
             <div className="ad-page-title">Dashboard Overview</div>
-            {!stats && <div className="ad-loading"><Spinner dark/>Loading stats…</div>}
-            {stats && (
-              <div className="ad-stats-grid">
-                {[
-                  {label:"Total Registered",val:stats.total,      icon:"👥",color:"#4F46E5"},
-                  {label:"Quiz Started",    val:stats.started,    icon:"▶️",  color:"#7C3AED"},
-                  {label:"Completed",       val:stats.completed,  icon:"✅",color:"#059669"},
-                  {label:"Passed",          val:stats.passed,     icon:"🏆",color:"#D97706"},
-                  {label:"Not Started",     val:stats.notStarted, icon:"⏳",color:"#64748B"},
-                  {label:"Avg Score",       val:stats.avgScore,   icon:"📈",color:"#0891B2"},
-                ].map(s=>(
-                  <div key={s.label} className="ad-stat-card" style={{borderTopColor:s.color}}>
-                    <div className="ad-stat-icon">{s.icon}</div>
-                    <div className="ad-stat-val" style={{color:s.color}}>{s.val}</div>
-                    <div className="ad-stat-lbl">{s.label}</div>
-                  </div>
-                ))}
-              </div>
+            {!overview && <div className="ad-loading"><Spinner dark/>Loading overview…</div>}
+            {overview && (
+              <>
+                <div className="ad-stats-grid">
+                  {[
+                    {label:"Total Drives",            val:overview.drives.total,            icon:"🎓",color:"#4F46E5"},
+                    {label:"Active Drives",           val:overview.drives.active,           icon:"🟢",color:"#059669"},
+                    {label:"Archived Drives",         val:overview.drives.archived,         icon:"🗄️",color:"#64748B"},
+                    {label:"Total Candidates",        val:overview.candidates.total,        icon:"👥",color:"#0891B2"},
+                    {label:"Walk-In Candidates",      val:overview.candidates.walkIn,       icon:"🚶",color:"#7C3AED"},
+                    {label:"Pre-Registered",          val:overview.candidates.preRegistered,icon:"✉️",color:"#1a56db"},
+                    {label:"Selected (≥ cutoff)",     val:overview.candidates.selected,     icon:"🏆",color:"#D97706"},
+                    {label:"Avg Score",               val:overview.candidates.avgScore,     icon:"📈",color:"#0EA5E9"},
+                  ].map(s=>(
+                    <div key={s.label} className="ad-stat-card" style={{borderTopColor:s.color}}>
+                      <div className="ad-stat-icon">{s.icon}</div>
+                      <div className="ad-stat-val" style={{color:s.color}}>{s.val}</div>
+                      <div className="ad-stat-lbl">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="ad-page-title" style={{marginTop:24,fontSize:16}}>Recent Activity</div>
+                <div className="ad-table-wrap">
+                  {(!overview.recentActivity||!overview.recentActivity.length)
+                    ? <div className="ad-empty">No recent activity.</div>
+                    : <div style={{display:"flex",flexDirection:"column"}}>
+                        {overview.recentActivity.map((a,i)=>(
+                          <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",borderBottom:"1px solid var(--line,#eee)"}}>
+                            <span>{a.type==="completed"?"✅":a.type==="disqualified"?"🚫":a.type==="drive"?"🎓":"📝"}</span>
+                            <span style={{flex:1,fontSize:13,color:"var(--text-1)"}}>{a.text}</span>
+                            {a.source && <span className="ad-badge ad-badge--gray">{a.source==="WALK_IN"?"Walk-in":a.source==="PRE_REGISTERED"?"Pre-reg":a.source}</span>}
+                            <span style={{fontSize:11,color:"var(--text-3)"}}>{fmtDateTime(a.at)}</span>
+                          </div>
+                        ))}
+                      </div>}
+                </div>
+              </>
             )}
           </div>
         )}

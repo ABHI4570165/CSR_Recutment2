@@ -107,6 +107,11 @@ export const deleteSection   = (name) => adminApi.delete(`/admin/sections/${name
 export const fetchCutoff     = (p)    => adminApi.get("/admin/cutoff",   { params: p });
 export const testEmail       = (to)   => adminApi.post("/admin/test-email", { to });
 
+// ── Assessment Active Mode (Render keep-awake) ─────────────────────────────────
+export const getSystemStatus = ()    => adminApi.get("/system/status");
+export const setActiveMode   = (d)   => adminApi.post("/system/active-mode", d);
+export const sendHeartbeat   = ()    => adminApi.post("/system/heartbeat");
+
 // ── Question APIs ─────────────────────────────────────────────────────────────
 export const fetchQuestions = (p)    => adminApi.get("/questions",        { params: p });
 export const addQuestion    = (d)    => adminApi.post("/questions", d);
@@ -115,6 +120,7 @@ export const deleteQuestion = (id)   => adminApi.delete(`/questions/${id}`);
 
 // ── Campus Recruitment — Admin (assessments / drives + candidates) ─────────────
 export const fetchAssessments     = ()      => adminApi.get("/assessments");
+export const fetchOverview        = ()      => adminApi.get("/assessments/overview");
 export const createAssessment     = (d)     => adminApi.post("/assessments", d);
 export const updateAssessment     = (id,d)  => adminApi.put(`/assessments/${id}`, d);
 export const deleteAssessment     = (id,f)  => adminApi.delete(`/assessments/${id}${f?"?force=true":""}`);
@@ -134,3 +140,7 @@ export const getCandidate    = (token)    => candApi.get(`/candidate/${token}`);
 export const startCandidate  = (token)    => candApi.post(`/candidate/${token}/start`);
 export const saveCandidate   = (token, d) => candApi.post(`/candidate/${token}/save`, d);
 export const submitCandidate = (token, d) => candApi.post(`/candidate/${token}/submit`, d);
+
+// ── Walk-in portal (public, test-code based) ───────────────────────────────────
+export const validateTestCode = (d) => candApi.post("/walkin/validate", d);
+export const registerWalkIn   = (d) => candApi.post("/walkin/register", d);

@@ -82,6 +82,9 @@ mongoose.connect(process.env.MONGO_URI, {
   // Start the invitation email scheduler once the DB is ready.
   try { require("./utils/emailQueue").startScheduler(); }
   catch (e) { console.warn("Email scheduler not started:", e.message); }
+  // Start the Assessment Active Mode auto-off scheduler.
+  try { require("./controllers/systemController").startAutoOffScheduler(); }
+  catch (e) { console.warn("Active-mode scheduler not started:", e.message); }
 }).catch((err) => { console.error("❌  MongoDB:", err.message); process.exit(1); });
 
 // ── STEP 5: Redis (optional) ──────────────────────────────────────────────────
@@ -95,6 +98,8 @@ app.use("/api/questions",   require("./routes/questions"));
 // ── Campus recruitment platform (additive — does not touch legacy routes) ──────
 app.use("/api/assessments", require("./routes/assessments")); // admin: drives + candidates
 app.use("/api/candidate",   require("./routes/candidate"));   // public: token-based flow
+app.use("/api/walkin",      require("./routes/walkin"));      // public: walk-in test-code registration
+app.use("/api/system",      require("./routes/system"));      // admin: active-mode + heartbeat
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) =>
