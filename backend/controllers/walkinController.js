@@ -22,9 +22,9 @@ async function findOpenWalkInDrive(testCode) {
   if ((drive.endAt && now > new Date(drive.endAt).getTime()) ||
       (drive.deadline && now > new Date(drive.deadline).getTime()))
     return { error: "This assessment window has closed.", code: 410 };
-  if (drive.maxCandidates != null && drive.walkInCount >= drive.maxCandidates)
-    return { error: "Registration Closed. Maximum candidate limit reached.", code: 409 };
-
+  // NOTE: capacity is NOT checked here — returning candidates must be able to
+  // resume even when the drive is full. Capacity is enforced for NEW registrations
+  // only, inside registerWalkIn.
   return { drive };
 }
 
@@ -98,6 +98,27 @@ exports.registerWalkIn = async (req, res) => {
     if (r.error) return res.status(r.code).json({ success: false, message: r.error });
     const drive = r.drive;
 
+    // ── RE-ENTRY / RESUME ──────────────────────────────────────────────────────
+    // If this person already registered for this drive (matched by email OR Aadhaar)
+    // and hasn't finished, return their EXISTING token so they resume the same
+    // attempt — instead of forcing a new registration. This is the professional
+    // recovery path after a crash / closed tab / network drop.
+    const aadhaar = String(b.aadhaar || "").trim();
+    const existing = await Candidate.findOne({
+      assessmentId: drive._id,
+      $or: [{ email }, ...(aadhaar ? [{ aadhaar }] : [])],
+    });
+    if (existing) {
+      if (["completed", "shortlisted", "rejected"].includes(existing.status)) {
+        return res.status(409).json({ success: false, message: "You have already completed this assessment. It can only be taken once." });
+      }
+      if (existing.status === "disqualified") {
+        return res.status(409).json({ success: false, message: "Your assessment session was terminated and cannot be resumed." });
+      }
+      // Resumable (invited / in-progress) → hand back the same token. No new row, no capacity change.
+      return res.status(200).json({ success: true, resumed: true, token: existing.token, link: buildLink(existing.token), data: { name: existing.name } });
+    }
+
     // Atomic capacity claim — guarantees we never exceed maxCandidates under load.
     if (drive.maxCandidates != null) {
       const claimed = await Assessment.findOneAndUpdate(
@@ -133,6 +154,11 @@ exports.registerWalkIn = async (req, res) => {
       // Roll the capacity counter back on failure (e.g. duplicate email in this drive).
       if (drive.maxCandidates != null) await Assessment.updateOne({ _id: drive._id }, { $inc: { walkInCount: -1 } });
       if (err.code === 11000) {
+        // Race: someone registered this email a moment ago — resume that attempt.
+        const dup = await Candidate.findOne({ assessmentId: drive._id, email });
+        if (dup && !["completed", "shortlisted", "rejected", "disqualified"].includes(dup.status)) {
+          return res.status(200).json({ success: true, resumed: true, token: dup.token, link: buildLink(dup.token), data: { name: dup.name } });
+        }
         return res.status(409).json({ success: false, message: "This email is already registered for this assessment." });
       }
       throw err;
