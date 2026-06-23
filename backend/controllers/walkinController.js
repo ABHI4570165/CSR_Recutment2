@@ -2,6 +2,7 @@ const Assessment = require("../models/Assessment");
 const Candidate  = require("../models/Candidate");
 const { generateUniqueToken } = require("../utils/tokens");
 const { buildLink } = require("../utils/emailQueue");
+const { cloudinaryConfigured, uploadResume } = require("../utils/cloudinary");
 
 const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(s || "").trim());
 
@@ -38,22 +39,33 @@ function publicDrive(d) {
   };
 }
 
-const MAX_RESUME_BYTES = 2 * 1024 * 1024; // 2 MB cap (stored as base64 in Mongo)
-// Validate/normalize an uploaded resume payload { filename, mime, data(base64 dataURL or raw) }.
-function normalizeResume(r) {
+const MAX_RESUME_BYTES = 5 * 1024 * 1024; // 5 MB cap (Cloudinary handles storage)
+// Parse an uploaded resume payload { filename, mime, data(dataURL or base64) }.
+function parseResume(r) {
   if (!r || !r.data) return undefined;
   const data = String(r.data);
-  // accept data URLs ("data:application/pdf;base64,....") or raw base64
   const base64 = data.includes(",") ? data.split(",").pop() : data;
   const bytes = Math.floor(base64.length * 0.75);
   if (bytes > MAX_RESUME_BYTES) return { _tooBig: true };
-  return {
-    filename: String(r.filename || "resume").slice(0, 200),
-    mime: String(r.mime || "application/octet-stream").slice(0, 100),
-    data: base64,
-    size: bytes,
-    uploadedAt: new Date(),
-  };
+  const filename = String(r.filename || "resume").slice(0, 200);
+  const mime = String(r.mime || "application/octet-stream").slice(0, 100);
+  const dataUrl = data.startsWith("data:") ? data : `data:${mime};base64,${base64}`;
+  return { filename, mime, base64, dataUrl, size: bytes };
+}
+
+// Store a resume → Cloudinary if configured (url only), else base64 fallback in Mongo.
+async function storeResume(parsed) {
+  if (!parsed) return undefined;
+  const base = { filename: parsed.filename, mime: parsed.mime, size: parsed.size, uploadedAt: new Date() };
+  if (cloudinaryConfigured()) {
+    try {
+      const { url, publicId } = await uploadResume(parsed.dataUrl, parsed.filename);
+      return { ...base, url, publicId };
+    } catch (e) {
+      console.warn("[walkin] Cloudinary upload failed, falling back to DB:", e.message);
+    }
+  }
+  return { ...base, data: parsed.base64 }; // fallback
 }
 
 // POST /api/walkin/validate  { testCode }
@@ -79,8 +91,8 @@ exports.registerWalkIn = async (req, res) => {
     if (!isEmail(email)) return res.status(400).json({ success: false, message: "A valid email is required." });
     if (!college) return res.status(400).json({ success: false, message: "College name is required." });
 
-    const resume = normalizeResume(b.resume);
-    if (resume && resume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 2 MB)." });
+    const parsedResume = parseResume(b.resume);
+    if (parsedResume && parsedResume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 5 MB)." });
 
     const r = await findOpenWalkInDrive(b.testCode);
     if (r.error) return res.status(r.code).json({ success: false, message: r.error });
@@ -97,6 +109,9 @@ exports.registerWalkIn = async (req, res) => {
     } else {
       await Assessment.updateOne({ _id: drive._id }, { $inc: { walkInCount: 1 } });
     }
+
+    // Upload resume (Cloudinary preferred) before creating the candidate.
+    const resume = await storeResume(parsedResume);
 
     // Create the candidate (reuses the SAME assessment engine via the token flow).
     try {

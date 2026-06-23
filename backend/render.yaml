@@ -52,3 +52,10 @@ services:
         value: 25
       - key: EMAIL_MAX_ATTEMPTS
         value: 3
+      # ── Cloudinary (walk-in resume storage) ──
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false

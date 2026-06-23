@@ -879,6 +879,8 @@ function DrivesTab() {
   };
   const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>alert("Link copied"),()=>{}); };
   const getResume=async(c)=>{
+    // Cloudinary-hosted → open the public URL directly.
+    if(c.resume?.url){ window.open(c.resume.url,"_blank","noopener"); return; }
     try{
       const r=await downloadResume(c._id);
       const url=URL.createObjectURL(r.data);

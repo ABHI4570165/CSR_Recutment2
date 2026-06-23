@@ -312,7 +312,7 @@ exports.listCandidates = async (req, res) => {
 
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
-        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
+        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size resume.url status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
     ]);
@@ -476,7 +476,10 @@ exports.updateCandidateStatus = async (req, res) => {
 exports.getCandidateResume = async (req, res) => {
   try {
     const c = await Candidate.findById(req.params.id).select("resume name").lean();
-    if (!c || !c.resume || !c.resume.data) return res.status(404).json({ success: false, message: "No resume on file." });
+    if (!c || !c.resume || (!c.resume.url && !c.resume.data)) return res.status(404).json({ success: false, message: "No resume on file." });
+    // Cloudinary-hosted → redirect to the secure URL.
+    if (c.resume.url) return res.redirect(c.resume.url);
+    // Base64 fallback → stream the file.
     const buf = Buffer.from(c.resume.data, "base64");
     const safe = String(c.name || "candidate").replace(/[^a-z0-9]+/gi, "_");
     res.setHeader("Content-Type", c.resume.mime || "application/octet-stream");

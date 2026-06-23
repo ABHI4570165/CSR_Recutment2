@@ -72,11 +72,13 @@ const candidateSchema = new mongoose.Schema({
   location: { type: String, trim: true },
   course:   { type: String, trim: true },
   branch:   { type: String, trim: true },
-  // Uploaded resume (base64 in DB — kept small via a 2MB cap at the API)
+  // Uploaded resume. Preferred: Cloudinary (url + publicId). Fallback: base64 `data`.
   resume: {
     filename:   { type: String },
     mime:       { type: String },
-    data:       { type: String },   // base64 (no data-URL prefix)
+    url:        { type: String },   // Cloudinary secure URL (preferred)
+    publicId:   { type: String },   // Cloudinary public_id (for deletion)
+    data:       { type: String },   // base64 fallback (only if Cloudinary not configured)
     size:       { type: Number },
     uploadedAt: { type: Date },
   },

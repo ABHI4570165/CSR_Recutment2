@@ -19,7 +19,7 @@ const FIELDS = [
 
 const AADHAAR_RE = /^\d{12}$/;
 const PHONE_RE = /^\d{10}$/;
-const MAX_RESUME_MB = 2;
+const MAX_RESUME_MB = 5;
 
 export default function WalkInPortal() {
   const navigate = useNavigate();
