@@ -2,7 +2,7 @@ const router = require("express").Router();
 const {
   createAssessment, listAssessments, getAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleEmails,
-  listCandidates, candidateStats, overviewStats, listColleges, updateCandidateStatus, deleteCandidate,
+  listCandidates, candidateStats, overviewStats, listColleges, updateCandidateStatus, deleteCandidate, getCandidateResume,
 } = require("../controllers/assessmentController");
 const { authAdmin } = require("../middleware/auth");
 
@@ -16,6 +16,7 @@ router.get   ("/candidate-stats", authAdmin, candidateStats);
 router.post  ("/candidates",  authAdmin, uploadCandidates);
 router.post  ("/schedule",    authAdmin, scheduleEmails);
 router.patch ("/candidates/status", authAdmin, updateCandidateStatus);
+router.get   ("/candidates/:id/resume", authAdmin, getCandidateResume);
 router.delete("/candidates/:id",    authAdmin, deleteCandidate);
 router.get   ("/:id",         authAdmin, getAssessment);
 router.put   ("/:id",         authAdmin, updateAssessment);

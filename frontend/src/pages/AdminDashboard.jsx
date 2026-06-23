@@ -6,7 +6,7 @@ import {
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, testEmail,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, testEmail,
   getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
@@ -611,14 +611,18 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
           <div className="ad-field" style={{width:120}}><label className="ad-label">End Time</label>
             <input type="time" className="ad-input" value={endTime} onChange={e=>setEndTime(e.target.value)}/></div>
         </div>
-        <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Assessment Link Send Time</label>
+        {driveType==="WALK_IN"
+          ? <div className="ad-empty" style={{marginTop:10,textAlign:"left",background:"#F5F3FF",border:"1px solid #DDD6FE",color:"#6D28D9",padding:"10px 14px",fontSize:12.5}}>
+              🚶 Walk-in drive — no email links. Share the <strong>/test</strong> portal link; students self-register with the test code. Registration opens before the start time; the assessment begins at the start time.
+            </div>
+          : <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Assessment Link Send Time</label>
           <select className="ad-input ad-select" value={linkSendOption} onChange={e=>setLinkSendOption(e.target.value)}>
             {LINK_SEND_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           {linkSendOption==="custom"
             ? <input type="datetime-local" className="ad-input" style={{marginTop:8}} value={linkSendCustom} onChange={e=>setLinkSendCustom(e.target.value)}/>
             : <span className="ad-hint">Shortlist email sends immediately on upload. The assessment link sends {linkSendOption==="immediately"?"immediately":`${LINK_SEND_OPTIONS.find(o=>o.value===linkSendOption)?.label.toLowerCase()}`}.</span>}
-        </div>
+        </div>}
         <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Sections (drawn from the shared question pool)</label>
           <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4}}>
             {secs.map((s,i)=>(
@@ -874,6 +878,15 @@ function DrivesTab() {
     try{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); }catch(e){alert(e.message);}
   };
   const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>alert("Link copied"),()=>{}); };
+  const getResume=async(c)=>{
+    try{
+      const r=await downloadResume(c._id);
+      const url=URL.createObjectURL(r.data);
+      const a=document.createElement("a"); a.href=url;
+      a.download=`${c.name.replace(/\s+/g,"_")}_${c.resume?.filename||"resume"}`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }catch(e){ alert(e.message||"No resume on file."); }
+  };
 
   const archiveDrive=async(d)=>{
     const to = d.status==="ARCHIVED" ? "ACTIVE" : "ARCHIVED";
@@ -889,9 +902,10 @@ function DrivesTab() {
       if(picks && picks.size) rows=rows.filter(c=>picks.has(c._id));
       const cutoff=drive.cutoff;
       const ws=XLSX.utils.json_to_sheet(rows.map(c=>({
-        Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Gender:c.gender||"", DOB:c.dob||"",
-        Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
+        Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Course:c.course||"", Branch:c.branch||"",
+        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
         Drive:drive.name, "Drive Type":drive.driveType, Source:c.candidateSource||"PRE_REGISTERED",
+        Resume:c.resume?.filename?"Yes":"No",
         Score:c.score??"-", "Total":c.totalMarks??"-",
         Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
         Status:c.status, Violations:c.violations?.total||0,
@@ -1079,7 +1093,10 @@ function DrivesTab() {
                 <td className="ad-td-sm">{c.emailStatus}</td>
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
-                <td><button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button></td>
+                <td style={{display:"flex",gap:4}}>
+                  <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button>
+                  {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>getResume(c)}>📄 CV</button>}
+                </td>
                 <td><button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>removeCand(c._id)}>Delete</button></td>
               </tr>
             );

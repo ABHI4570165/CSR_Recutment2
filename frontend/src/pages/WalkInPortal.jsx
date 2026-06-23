@@ -7,23 +7,27 @@ const FIELDS = [
   ["name",     "Full Name",       "text",  true],
   ["usn",      "USN",             "text",  false],
   ["email",    "Email",           "email", true],
-  ["phone",    "Phone Number",    "tel",   false],
+  ["phone",    "Mobile Number",   "tel",   true],
+  ["course",   "Course",          "text",  false],
+  ["branch",   "Branch",          "text",  false],
+  ["college",  "College Name",    "text",  true],
   ["gender",   "Gender",          "select",false],
   ["dob",      "Date of Birth",   "date",  false],
   ["aadhaar",  "Aadhaar Number",  "text",  false],
-  ["college",  "College Name",    "text",  true],
   ["location", "Location",        "text",  false],
 ];
 
 const AADHAAR_RE = /^\d{12}$/;
 const PHONE_RE = /^\d{10}$/;
+const MAX_RESUME_MB = 2;
 
 export default function WalkInPortal() {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    name: "", usn: "", email: "", phone: "", gender: "", dob: "",
+    name: "", usn: "", email: "", phone: "", course: "", branch: "", gender: "", dob: "",
     aadhaar: "", college: "", location: "", testCode: "",
   });
+  const [resume, setResume] = useState(null);   // { filename, mime, data }
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -47,14 +51,25 @@ export default function WalkInPortal() {
     } catch (e) { setDrive(null); setCodeMsg(e.message || "Invalid test code."); }
   };
 
+  const onResume = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) { setResume(null); return; }
+    if (f.size > MAX_RESUME_MB * 1024 * 1024) { setErr(`Resume must be under ${MAX_RESUME_MB} MB.`); e.target.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = () => setResume({ filename: f.name, mime: f.type || "application/octet-stream", data: String(reader.result) });
+    reader.readAsDataURL(f);  // → data URL; backend strips the prefix
+    setErr("");
+  };
+
   const validate = () => {
     const fe = {};
     if (!form.name.trim()) fe.name = "Required";
     if (!form.email.trim()) fe.email = "Required";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) fe.email = "Invalid email";
     if (!form.college.trim()) fe.college = "Required";
+    if (!form.phone.trim()) fe.phone = "Required";
+    else if (!PHONE_RE.test(form.phone.replace(/\s/g, ""))) fe.phone = "10 digits";
     if (!form.testCode.trim()) fe.testCode = "Required";
-    if (form.phone && !PHONE_RE.test(form.phone.replace(/\s/g, ""))) fe.phone = "10 digits";
     if (form.aadhaar && !AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "12 digits";
     return fe;
   };
@@ -65,7 +80,7 @@ export default function WalkInPortal() {
     if (!agreed) { setErr("Please accept the Terms & Conditions to continue."); return; }
     setBusy(true); setErr("");
     try {
-      const r = await registerWalkIn({ ...form, testCode: form.testCode.trim().toUpperCase() });
+      const r = await registerWalkIn({ ...form, testCode: form.testCode.trim().toUpperCase(), resume });
       navigate(`/assessment/${r.data.token}`);   // reuse the EXISTING assessment engine
     } catch (e) { setErr(e.message || "Registration failed."); setBusy(false); }
   };
@@ -103,6 +118,11 @@ export default function WalkInPortal() {
 
           <div className="wp-grid">
             {FIELDS.filter(f => f[0] !== "testCode").map(inputFor)}
+            <div className="wp-field wp-field--full">
+              <label className="wp-label">Resume (PDF/DOC, max {MAX_RESUME_MB} MB)</label>
+              <input className="wp-input" type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
+              {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
+            </div>
           </div>
 
           <div className="wp-codebox">

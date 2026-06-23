@@ -70,6 +70,16 @@ const candidateSchema = new mongoose.Schema({
   dob:      { type: String, trim: true },
   aadhaar:  { type: String, trim: true },
   location: { type: String, trim: true },
+  course:   { type: String, trim: true },
+  branch:   { type: String, trim: true },
+  // Uploaded resume (base64 in DB — kept small via a 2MB cap at the API)
+  resume: {
+    filename:   { type: String },
+    mime:       { type: String },
+    data:       { type: String },   // base64 (no data-URL prefix)
+    size:       { type: Number },
+    uploadedAt: { type: Date },
+  },
 
   // Secure access
   token:          { type: String, required: true, unique: true, index: true }, // non-guessable URL token

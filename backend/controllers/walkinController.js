@@ -15,8 +15,9 @@ async function findOpenWalkInDrive(testCode) {
   if (drive.status !== "ACTIVE") return { error: "This assessment is not currently active.", code: 403 };
 
   const now = Date.now();
-  if (drive.startAt && now < new Date(drive.startAt).getTime())
-    return { error: "This assessment has not started yet.", code: 425 };
+  // NOTE: registration is allowed BEFORE the start time — students register early
+  // and wait on the countdown. The assessment itself only opens at startAt
+  // (enforced by the candidate engine). We only block after the window closes.
   if ((drive.endAt && now > new Date(drive.endAt).getTime()) ||
       (drive.deadline && now > new Date(drive.deadline).getTime()))
     return { error: "This assessment window has closed.", code: 410 };
@@ -31,7 +32,27 @@ function publicDrive(d) {
     assessmentName: d.name,
     durationMinutes: d.durationMinutes,
     college: d.college || "",
+    startAt: d.startAt || null,
+    endAt: d.endAt || null,
     capacity: d.maxCandidates != null ? { current: d.walkInCount, max: d.maxCandidates } : null,
+  };
+}
+
+const MAX_RESUME_BYTES = 2 * 1024 * 1024; // 2 MB cap (stored as base64 in Mongo)
+// Validate/normalize an uploaded resume payload { filename, mime, data(base64 dataURL or raw) }.
+function normalizeResume(r) {
+  if (!r || !r.data) return undefined;
+  const data = String(r.data);
+  // accept data URLs ("data:application/pdf;base64,....") or raw base64
+  const base64 = data.includes(",") ? data.split(",").pop() : data;
+  const bytes = Math.floor(base64.length * 0.75);
+  if (bytes > MAX_RESUME_BYTES) return { _tooBig: true };
+  return {
+    filename: String(r.filename || "resume").slice(0, 200),
+    mime: String(r.mime || "application/octet-stream").slice(0, 100),
+    data: base64,
+    size: bytes,
+    uploadedAt: new Date(),
   };
 }
 
@@ -58,6 +79,9 @@ exports.registerWalkIn = async (req, res) => {
     if (!isEmail(email)) return res.status(400).json({ success: false, message: "A valid email is required." });
     if (!college) return res.status(400).json({ success: false, message: "College name is required." });
 
+    const resume = normalizeResume(b.resume);
+    if (resume && resume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 2 MB)." });
+
     const r = await findOpenWalkInDrive(b.testCode);
     if (r.error) return res.status(r.code).json({ success: false, message: r.error });
     const drive = r.drive;
@@ -82,6 +106,8 @@ exports.registerWalkIn = async (req, res) => {
         name, email, college,
         candidateSource: "WALK_IN",
         usn: b.usn, phone: b.phone, gender: b.gender, dob: b.dob, aadhaar: b.aadhaar, location: b.location,
+        course: b.course, branch: b.branch,
+        ...(resume ? { resume } : {}),
         token,
         tokenExpiresAt: drive.endAt || drive.deadline || undefined,
         status: "invited",
