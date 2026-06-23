@@ -805,11 +805,13 @@ exports.submitCandidate = async (req, res) => {
     c.sectionScores = sectionScores;
     c.timeTakenSeconds = elapsed;
     c.progress = undefined; // free the in-flight snapshot
+    // Queue the completion email (thank-you if completed, termination if disqualified).
+    // Queued + retried by the scheduler so a transient failure never loses it.
+    c.completionEmail = { status: "pending", scheduledAt: new Date(), attempts: 0 };
     await c.save();
 
-    // Send the appropriate email (best-effort — never blocks the response).
-    if (disqualified) queueDisqualification(c);   // NOT the thank-you
-    else queueThankYou(c, assessment);
+    // Attempt delivery immediately (does not block the response); scheduler retries on failure.
+    setImmediate(() => flushNow(50).catch(() => {}));
 
     res.json({ success: true, disqualified, data: { name: c.name } }); // no score leaked to candidate
   } catch (err) {

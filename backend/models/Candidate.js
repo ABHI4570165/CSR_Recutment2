@@ -99,6 +99,16 @@ const candidateSchema = new mongoose.Schema({
   // Shortlist email (sent immediately on upload) — separate track
   shortlistEmail: { type: shortlistEmailSchema, default: () => ({}) },
 
+  // Completion email (thank-you OR disqualification) — queued + retried like the
+  // other tracks so transient failures don't lose it. Kind is derived from status.
+  completionEmail: {
+    status:      { type: String, enum: ["none", "pending", "sending", "sent", "failed"], default: "none" },
+    scheduledAt: { type: Date },
+    sentAt:      { type: Date },
+    attempts:    { type: Number, default: 0 },
+    error:       { type: String },
+  },
+
   // One-off email timestamps for tracking
   thankYouEmailSentAt:        { type: Date },
   disqualificationEmailSentAt:{ type: Date },
@@ -127,6 +137,7 @@ candidateSchema.index({ assessmentId: 1, status: 1 });
 candidateSchema.index({ assessmentId: 1, score: -1 });
 candidateSchema.index({ emailStatus: 1, emailScheduledAt: 1 }); // link-email scheduler poll
 candidateSchema.index({ "shortlistEmail.status": 1, "shortlistEmail.scheduledAt": 1 }); // shortlist poll
+candidateSchema.index({ "completionEmail.status": 1, "completionEmail.scheduledAt": 1 }); // completion poll
 candidateSchema.index({ assessmentId: 1, email: 1 }, { unique: true }); // one invite per email per drive
 
 candidateSchema.statics.STATUSES = STATUSES;

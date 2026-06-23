@@ -91,16 +91,58 @@ async function deliverShortlist(candidate) {
   }
 }
 
-/* Recover both tracks from orphaned "sending" (crash mid-send). */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * COMPLETION email track  (thank-you OR disqualification, derived from status)
+ * ───────────────────────────────────────────────────────────────────────────── */
+async function claimNextCompletion() {
+  return Candidate.findOneAndUpdate(
+    { "completionEmail.status": "pending", "completionEmail.scheduledAt": { $lte: new Date() }, "completionEmail.attempts": { $lt: MAX_ATTEMPTS } },
+    { $set: { "completionEmail.status": "sending" } },
+    { new: true, sort: { "completionEmail.scheduledAt": 1 } }
+  );
+}
+
+async function deliverCompletion(candidate) {
+  const disq = candidate.status === "disqualified";
+  try {
+    if (disq) {
+      await sendDisqualificationEmail(candidate);
+      candidate.disqualificationEmailSentAt = new Date();
+    } else {
+      const assessment = await Assessment.findById(candidate.assessmentId).lean();
+      await sendThankYouEmail(candidate, assessment);
+      candidate.thankYouEmailSentAt = new Date();
+    }
+    candidate.completionEmail.status = "sent";
+    candidate.completionEmail.sentAt = new Date();
+    candidate.completionEmail.attempts = (candidate.completionEmail.attempts || 0) + 1;
+    candidate.completionEmail.error = undefined;
+    await candidate.save();
+    console.log(`[emailQueue] ✔ ${disq ? "TERMINATION" : "THANK-YOU"} sent to ${candidate.email}`);
+    return { ok: true };
+  } catch (err) {
+    const attempts = (candidate.completionEmail.attempts || 0) + 1;
+    candidate.completionEmail.attempts = attempts; candidate.completionEmail.error = err.message;
+    if (attempts >= MAX_ATTEMPTS) candidate.completionEmail.status = "failed";
+    else { candidate.completionEmail.status = "pending"; candidate.completionEmail.scheduledAt = new Date(Date.now() + attempts * attempts * 60000); }
+    await candidate.save();
+    logMailError(`${disq ? "TERMINATION" : "THANK-YOU"} ${candidate.email}`, err);
+    return { ok: false, error: err.message, email: candidate.email };
+  }
+}
+
+/* Recover all tracks from orphaned "sending" (crash mid-send). */
 async function recoverStaleSending() {
   const cutoff = new Date(Date.now() - STALE_SENDING_MS);
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     Candidate.updateMany({ emailStatus: "sending", updatedAt: { $lt: cutoff } },
       { $set: { emailStatus: "scheduled", emailScheduledAt: new Date() } }),
     Candidate.updateMany({ "shortlistEmail.status": "sending", updatedAt: { $lt: cutoff } },
       { $set: { "shortlistEmail.status": "scheduled", "shortlistEmail.scheduledAt": new Date() } }),
+    Candidate.updateMany({ "completionEmail.status": "sending", updatedAt: { $lt: cutoff } },
+      { $set: { "completionEmail.status": "pending", "completionEmail.scheduledAt": new Date() } }),
   ]);
-  const n = (a.modifiedCount || 0) + (b.modifiedCount || 0);
+  const n = (a.modifiedCount || 0) + (b.modifiedCount || 0) + (c.modifiedCount || 0);
   if (n) console.log(`[emailQueue] recovered ${n} stale 'sending' row(s)`);
 }
 
@@ -129,11 +171,12 @@ async function processQueue() {
     }
     await recoverStaleSending();
     const half = Math.max(1, Math.floor(BATCH_SIZE / 2));
-    const sl = await drainTrack(claimNextShortlist, deliverShortlist, half, "shortlist"); // shortlist first (time-sensitive)
-    const ln = await drainTrack(claimNextLink, deliverLink, BATCH_SIZE - sl.processed, "link");
-    const total = sl.processed + ln.processed;
-    if (total) console.log(`[emailQueue] tick done: shortlist ${sl.sent}/${sl.processed}, link ${ln.sent}/${ln.processed}`);
-    return { processed: total, sent: sl.sent + ln.sent, failed: sl.failed + ln.failed, errors: [...sl.errors, ...ln.errors] };
+    const co = await drainTrack(claimNextCompletion, deliverCompletion, half, "completion"); // completion first (just finished)
+    const sl = await drainTrack(claimNextShortlist, deliverShortlist, half, "shortlist");
+    const ln = await drainTrack(claimNextLink, deliverLink, Math.max(1, BATCH_SIZE - co.processed - sl.processed), "link");
+    const total = co.processed + sl.processed + ln.processed;
+    if (total) console.log(`[emailQueue] tick done: completion ${co.sent}/${co.processed}, shortlist ${sl.sent}/${sl.processed}, link ${ln.sent}/${ln.processed}`);
+    return { processed: total, sent: co.sent + sl.sent + ln.sent, failed: co.failed + sl.failed + ln.failed, errors: [...co.errors, ...sl.errors, ...ln.errors] };
   } catch (err) {
     console.error("[emailQueue] tick error:", err.message);
     return { processed: 0, sent: 0, failed: 0, errors: [{ error: err.message }] };
@@ -146,9 +189,10 @@ async function processQueue() {
 async function flushNow(limit = 200) {
   if (!emailConfigured()) return { processed: 0, sent: 0, failed: 0, errors: [], notConfigured: true, diag: emailDiag() };
   await recoverStaleSending();
+  const co = await drainTrack(claimNextCompletion, deliverCompletion, limit, "completion");
   const sl = await drainTrack(claimNextShortlist, deliverShortlist, limit, "shortlist");
   const ln = await drainTrack(claimNextLink, deliverLink, limit, "link");
-  return { processed: sl.processed + ln.processed, sent: sl.sent + ln.sent, failed: sl.failed + ln.failed, errors: [...sl.errors, ...ln.errors] };
+  return { processed: co.processed + sl.processed + ln.processed, sent: co.sent + sl.sent + ln.sent, failed: co.failed + sl.failed + ln.failed, errors: [...co.errors, ...sl.errors, ...ln.errors] };
 }
 
 let timer = null;
