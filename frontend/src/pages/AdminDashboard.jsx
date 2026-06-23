@@ -1341,6 +1341,12 @@ function ActiveModeBanner() {
 }
 
 function Dashboard({ onLogout }) {
+  // Theme is scoped to the admin dashboard only (applied to .ad-page, not the
+  // document) so it never affects the candidate/walk-in pages.
+  const [theme, setTheme] = useState(()=> localStorage.getItem("mh_theme") || "light");
+  useEffect(()=>{ localStorage.setItem("mh_theme", theme); },[theme]);
+  const toggleTheme=()=>setTheme(t=>t==="dark"?"light":"dark");
+
   const [tab,        setTab]       = useState("dashboard");
   const [stats,      setStats]     = useState(null);
   const [overview,   setOverview]  = useState(null);
@@ -1472,7 +1478,7 @@ function Dashboard({ onLogout }) {
   };
 
   return (
-    <div className="ad-page">
+    <div className="ad-page" data-theme={theme}>
       <header className="ad-topbar">
         <div className="ad-topbar-left">
           <div className="ad-topbar-logo"><img src="/logo.png" alt="M H Foundation" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
@@ -1481,7 +1487,12 @@ function Dashboard({ onLogout }) {
             <div className="ad-topbar-sub">Admin Dashboard · M H Foundation®</div>
           </div>
         </div>
-        <button className="ad-btn ad-btn--outline ad-btn--logout" onClick={onLogout}>Sign Out</button>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button className="ad-theme-toggle" onClick={toggleTheme} title={theme==="dark"?"Switch to light mode":"Switch to dark mode"} aria-label="Toggle theme">
+            <span className="ad-theme-knob">{theme==="dark"?"🌙":"☀️"}</span>
+          </button>
+          <button className="ad-btn ad-btn--outline ad-btn--logout" onClick={onLogout}>Sign Out</button>
+        </div>
       </header>
 
       <div style={{padding:"0 0"}}><ActiveModeBanner/></div>
