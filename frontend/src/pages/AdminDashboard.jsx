@@ -980,6 +980,26 @@ function DrivesTab() {
   );
 
   // ── Single drive view ──
+  const isWalkIn = sel.driveType === "WALK_IN";
+  const portalUrl = `${window.location.origin}/test`;
+  const counterCards = isWalkIn
+    ? [
+        {label:"Registered",   val:stats?.counters?.uploaded,     color:"#7C3AED"},
+        {label:"Started",      val:stats?.counters?.started,      color:"#D97706"},
+        {label:"Completed",    val:stats?.counters?.completed,    color:"#059669"},
+        {label:"Disqualified", val:stats?.counters?.disqualified, color:"#DC2626"},
+      ]
+    : [
+        {label:"Candidates Uploaded", val:stats?.counters?.uploaded,            color:"#4F46E5"},
+        {label:"Shortlist Emails Sent",val:stats?.counters?.shortlistEmailsSent, color:"#0891B2"},
+        {label:"Assessment Links Sent",val:stats?.counters?.linkEmailsSent,      color:"#2563EB"},
+        {label:"Started",             val:stats?.counters?.started,             color:"#D97706"},
+        {label:"Completed",           val:stats?.counters?.completed,           color:"#059669"},
+        {label:"Disqualified",        val:stats?.counters?.disqualified,        color:"#DC2626"},
+      ];
+  // Hide email-only statuses (Invited / Link Sent) on walk-in drives.
+  const pipelineMeta = isWalkIn ? STATUS_META.filter(s=>!["invited","email-sent"].includes(s.key)) : STATUS_META;
+
   return (
     <div>
       {toastEl}
@@ -988,9 +1008,15 @@ function DrivesTab() {
       <div className="ad-section-head">
         <div className="ad-page-title" style={{marginBottom:0}}>{sel.name}</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="ad-btn ad-btn--primary" onClick={()=>setShowUpload(true)}>+ Upload Candidates</button>
-          <button className="ad-btn ad-btn--outline" onClick={sendInvites} disabled={busy}>{busy?<><Spinner/>…</>:"📧 Send Pending Invites"}</button>
-          <button className="ad-btn ad-btn--outline" onClick={runTestEmail} disabled={busy}>✉ Test Email</button>
+          {isWalkIn ? (
+            <button className="ad-btn ad-btn--primary" onClick={()=>copyLink(portalUrl)}>🔗 Copy Test Portal Link</button>
+          ) : (
+            <>
+              <button className="ad-btn ad-btn--primary" onClick={()=>setShowUpload(true)}>+ Upload Candidates</button>
+              <button className="ad-btn ad-btn--outline" onClick={sendInvites} disabled={busy}>{busy?<><Spinner/>…</>:"📧 Send Pending Invites"}</button>
+              <button className="ad-btn ad-btn--outline" onClick={runTestEmail} disabled={busy}>✉ Test Email</button>
+            </>
+          )}
           <button className="ad-btn ad-btn--export" onClick={exportCands}>⬇ Export</button>
         </div>
       </div>
@@ -1000,20 +1026,20 @@ function DrivesTab() {
         <span><strong>Date:</strong> {fmtDate(sel.assessmentDate||sel.startAt)}</span>
         <span><strong>Start:</strong> {fmtTimeOnly(sel.startAt)}</span>
         <span><strong>End:</strong> {fmtTimeOnly(sel.endAt)}</span>
-        <span><strong>Link Send:</strong> {LINK_SEND_OPTIONS.find(o=>o.value===sel.linkSendOption)?.label || "—"}{sel.linkSendAt?` (${fmtDateTime(sel.linkSendAt)})`:""}</span>
+        {isWalkIn ? (
+          <>
+            <span style={{color:"#7C3AED",fontWeight:700}}><strong>Test Code:</strong> {sel.testCode||"—"}</span>
+            <span><strong>Capacity:</strong> {sel.walkInCount||0}{sel.maxCandidates!=null?` / ${sel.maxCandidates}`:" (unlimited)"}</span>
+          </>
+        ) : (
+          <span><strong>Link Send:</strong> {LINK_SEND_OPTIONS.find(o=>o.value===sel.linkSendOption)?.label || "—"}{sel.linkSendAt?` (${fmtDateTime(sel.linkSendAt)})`:""}</span>
+        )}
       </div>
 
       {/* Delivery / pipeline counters */}
       {stats?.counters && (
         <div className="ad-stats-grid" style={{marginBottom:14}}>
-          {[
-            {label:"Candidates Uploaded", val:stats.counters.uploaded,            color:"#4F46E5"},
-            {label:"Shortlist Emails Sent",val:stats.counters.shortlistEmailsSent, color:"#0891B2"},
-            {label:"Assessment Links Sent",val:stats.counters.linkEmailsSent,      color:"#2563EB"},
-            {label:"Started",             val:stats.counters.started,             color:"#D97706"},
-            {label:"Completed",           val:stats.counters.completed,           color:"#059669"},
-            {label:"Disqualified",        val:stats.counters.disqualified,        color:"#DC2626"},
-          ].map(s=>(
+          {counterCards.map(s=>(
             <div key={s.label} className="ad-stat-card" style={{borderTopColor:s.color}}>
               <div className="ad-stat-val" style={{color:s.color}}>{s.val||0}</div>
               <div className="ad-stat-lbl">{s.label}</div>
@@ -1025,7 +1051,7 @@ function DrivesTab() {
       {/* Status pipeline counters */}
       {stats && (
         <div className="ad-stats-grid" style={{marginBottom:18}}>
-          {STATUS_META.map(s=>(
+          {pipelineMeta.map(s=>(
             <div key={s.key} className="ad-stat-card" style={{borderTopColor:s.color}}>
               <div className="ad-stat-val" style={{color:s.color}}>{stats.statusCounts[s.key]||0}</div>
               <div className="ad-stat-lbl">{s.label}</div>
@@ -1075,9 +1101,9 @@ function DrivesTab() {
 
       <div className="ad-table-wrap">
         {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
-        :cands.length===0?<div className="ad-empty">No candidates yet. Click "Upload Candidates".</div>
+        :cands.length===0?<div className="ad-empty">{isWalkIn?"No candidates registered yet. Share the test portal link.":"No candidates yet. Click \"Upload Candidates\"."}</div>
         :<table className="ad-table">
-          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Source</th><th>Status</th><th>Shortlist</th><th>Link</th><th>Score</th><th>Viol.</th><th>Link</th><th></th></tr></thead>
+          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Source</th><th>Status</th>{!isWalkIn&&<th>Shortlist</th>}{!isWalkIn&&<th>Link</th>}<th>Score</th><th>Viol.</th><th>Actions</th><th></th></tr></thead>
           <tbody>{cands.map((c,i)=>{
             const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
             const walkIn=c.candidateSource==="WALK_IN";
@@ -1089,8 +1115,8 @@ function DrivesTab() {
                 <td className="ad-td-sm">{c.college}</td>
                 <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
                 <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
-                <td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>
-                <td className="ad-td-sm">{c.emailStatus}</td>
+                {!isWalkIn&&<td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>}
+                {!isWalkIn&&<td className="ad-td-sm">{c.emailStatus}</td>}
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
                 <td style={{display:"flex",gap:4}}>
