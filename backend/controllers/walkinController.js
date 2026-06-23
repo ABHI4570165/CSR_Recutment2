@@ -80,6 +80,38 @@ exports.validateTestCode = async (req, res) => {
   }
 };
 
+// POST /api/walkin/resume  { testCode, email, aadhaar }
+// Returning candidate enters only email + Aadhaar → fetch their existing attempt
+// and hand back the token so they continue from where they left off.
+exports.resumeWalkIn = async (req, res) => {
+  try {
+    const b = req.body || {};
+    const email = String(b.email || "").trim().toLowerCase();
+    const aadhaar = String(b.aadhaar || "").trim();
+    if (!email && !aadhaar) return res.status(400).json({ success: false, message: "Enter your email or Aadhaar number." });
+
+    const r = await findOpenWalkInDrive(b.testCode);
+    if (r.error) return res.status(r.code).json({ success: false, message: r.error });
+    const drive = r.drive;
+
+    const cand = await Candidate.findOne({
+      assessmentId: drive._id,
+      $or: [...(email ? [{ email }] : []), ...(aadhaar ? [{ aadhaar }] : [])],
+    });
+    if (!cand) return res.status(404).json({ success: false, message: "No registration found for these details. Please register first." });
+    if (["completed", "shortlisted", "rejected"].includes(cand.status)) {
+      return res.status(409).json({ success: false, message: "You have already completed this assessment." });
+    }
+    if (cand.status === "disqualified") {
+      return res.status(409).json({ success: false, message: "Your assessment session was terminated and cannot be resumed." });
+    }
+    return res.json({ success: true, token: cand.token, link: buildLink(cand.token), data: { name: cand.name, status: cand.status } });
+  } catch (err) {
+    console.error("resumeWalkIn:", err);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
 // POST /api/walkin/register  { testCode, name, email, college, usn, phone, gender, dob, aadhaar, location }
 exports.registerWalkIn = async (req, res) => {
   try {

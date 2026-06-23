@@ -283,7 +283,8 @@ function disqualificationHtml({ name }) {
         As a result, your assessment has been automatically terminated.
       </p>
       <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 14px;">
-        You may participate in future recruitment opportunities conducted by ${BRAND} and ${HIRING_PARTNER}.
+        You may participate in future recruitment opportunities conducted by ${BRAND}
+        .
       </p>
       <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0;">Thank you for your interest.</p>
     </div>`;
@@ -300,7 +301,7 @@ function thankYouHtml({ name, assessmentName }) {
       </p>
       <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;text-align:center;">
         <p style="color:#065f46;font-size:13px;margin:0;line-height:1.6;">
-          Assessment completed. Shortlisted candidates will be contacted by <strong>${HIRING_PARTNER}</strong> through official channels.
+          Assessment completed. Shortlisted candidates will be contacted by our team members.
           We appreciate your time and effort. Best of luck!
         </p>
       </div>

@@ -145,3 +145,4 @@ export const submitCandidate = (token, d) => candApi.post(`/candidate/${token}/s
 // ── Walk-in portal (public, test-code based) ───────────────────────────────────
 export const validateTestCode = (d) => candApi.post("/walkin/validate", d);
 export const registerWalkIn   = (d) => candApi.post("/walkin/register", d);
+export const resumeWalkIn     = (d) => candApi.post("/walkin/resume", d);

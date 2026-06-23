@@ -805,6 +805,8 @@ function DrivesTab() {
   const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [fSource,setFSource]=useState(""); const [search,setSearch]=useState("");
   const [showCreate,setShowCreate]=useState(false); const [showUpload,setShowUpload]=useState(false);
   const [editDrive,setEditDrive]=useState(null);
+  const [confirmState,setConfirmState]=useState(null); // {title,message,onConfirm}
+  const [confirmBusy,setConfirmBusy]=useState(false);
   const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
@@ -866,18 +868,27 @@ function DrivesTab() {
       showToast({ type:"error", title:"Email test failed", lines:[e.message, (e.step?("step: "+e.step):"")+extra] });
     }finally{ setBusy(false); }
   };
+  // Modern confirm: runs `fn` after the user confirms in a styled modal.
+  const askConfirm=(title,message,fn,danger=true)=>setConfirmState({title,message,danger,onConfirm:fn});
+  const runConfirm=async()=>{
+    if(!confirmState?.onConfirm) return;
+    setConfirmBusy(true);
+    try{ await confirmState.onConfirm(); setConfirmState(null); }
+    catch(e){ showToast({type:"error",title:"Action failed",lines:[e.message]}); }
+    finally{ setConfirmBusy(false); }
+  };
+
   const bulkStatus=async(status)=>{
-    if(!picked.size){ alert("Select candidates first."); return; }
+    if(!picked.size){ showToast({type:"error",title:"Select candidates first"}); return; }
     setBusy(true);
-    try{ await setCandidateStatus({ candidateIds:[...picked], status }); setPicked(new Set()); await loadDriveData(sel._id); }
-    catch(e){ alert(e.message); } finally{ setBusy(false); }
+    try{ await setCandidateStatus({ candidateIds:[...picked], status }); setPicked(new Set()); await loadDriveData(sel._id); showToast({type:"success",title:`Marked ${status}`}); }
+    catch(e){ showToast({type:"error",title:"Failed",lines:[e.message]}); } finally{ setBusy(false); }
   };
-  const removeCand=async(id)=>{ if(!window.confirm("Delete this candidate?"))return; try{await deleteCandidate(id); await loadDriveData(sel._id);}catch(e){alert(e.message);} };
-  const delDrive=async(d)=>{
-    if(!window.confirm(`Delete drive "${d.name}"? This also deletes its candidates.`))return;
-    try{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); }catch(e){alert(e.message);}
-  };
-  const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>alert("Link copied"),()=>{}); };
+  const removeCand=(id)=>askConfirm("Delete candidate?","This permanently removes the candidate and their attempt. This cannot be undone.",
+    async()=>{ await deleteCandidate(id); await loadDriveData(sel._id); showToast({type:"success",title:"Candidate deleted"}); });
+  const delDrive=(d)=>askConfirm(`Delete drive "${d.name}"?`,"This also deletes ALL its candidates and cannot be undone.",
+    async()=>{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); showToast({type:"success",title:"Drive deleted"}); });
+  const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>showToast({type:"success",title:"Copied to clipboard"}),()=>{}); };
   const getResume=async(c)=>{
     // Cloudinary-hosted → open the public URL directly.
     if(c.resume?.url){ window.open(c.resume.url,"_blank","noopener"); return; }
@@ -887,13 +898,13 @@ function DrivesTab() {
       const a=document.createElement("a"); a.href=url;
       a.download=`${c.name.replace(/\s+/g,"_")}_${c.resume?.filename||"resume"}`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    }catch(e){ alert(e.message||"No resume on file."); }
+    }catch(e){ showToast({type:"error",title:"No resume on file",lines:[e.message]}); }
   };
 
   const archiveDrive=async(d)=>{
     const to = d.status==="ARCHIVED" ? "ACTIVE" : "ARCHIVED";
-    try{ await updateAssessment(d._id,{status:to}); if(sel?._id===d._id) setSel({...sel,status:to}); await loadDrives(); }
-    catch(e){ alert(e.message); }
+    try{ await updateAssessment(d._id,{status:to}); if(sel?._id===d._id) setSel({...sel,status:to}); await loadDrives(); showToast({type:"success",title:to==="ARCHIVED"?"Drive archived":"Drive unarchived"}); }
+    catch(e){ showToast({type:"error",title:"Failed",lines:[e.message]}); }
   };
 
   // Build an .xlsx of a drive's candidates with the full V3 column set.
@@ -916,11 +927,23 @@ function DrivesTab() {
       })));
       const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Candidates");
       XLSX.writeFile(wb,`${drive.name.replace(/\s+/g,"_")}_candidates.xlsx`);
-    }catch(e){alert(e.message);}
+    }catch(e){ showToast({type:"error",title:"Export failed",lines:[e.message]}); }
   };
   const exportCands=()=>exportDriveCandidates(sel, picked.size?picked:null);
 
   const togglePick=(id)=>setPicked(p=>{const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n;});
+
+  // Auto-refresh so DB changes (deletes, new walk-in registrations, submissions)
+  // reflect in the dashboard without a manual reload.
+  useEffect(()=>{
+    const iv=setInterval(()=>{ if(sel){ loadDriveData(sel._id); } else { loadDrives(); } }, 12000);
+    return ()=>clearInterval(iv);
+  },[sel,loadDriveData,loadDrives]);
+
+  const confirmEl = confirmState && (
+    <ConfirmModal title={confirmState.title} message={confirmState.message}
+      onConfirm={runConfirm} onCancel={()=>setConfirmState(null)} loading={confirmBusy} />
+  );
 
   const toastEl = toast && (
     <div onClick={()=>setToast(null)} style={{position:"fixed",top:18,right:18,zIndex:9999,maxWidth:360,
@@ -935,7 +958,7 @@ function DrivesTab() {
   // ── Drive list view ──
   if(!sel) return (
     <div>
-      {toastEl}
+      {toastEl}{confirmEl}
       {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={()=>{setShowCreate(false);loadDrives();}}/>}
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
@@ -1004,7 +1027,7 @@ function DrivesTab() {
 
   return (
     <div>
-      {toastEl}
+      {toastEl}{confirmEl}
       {showUpload && <UploadModal assessment={sel} onClose={()=>setShowUpload(false)} onDone={()=>{setShowUpload(false);loadDriveData(sel._id);}}/>}
       <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setSel(null)} style={{marginBottom:14}}>← All Drives</button>
       <div className="ad-section-head">
