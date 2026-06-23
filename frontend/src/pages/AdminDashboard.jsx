@@ -802,7 +802,7 @@ function DrivesTab() {
   const [colleges,setColleges]=useState([]);
   const [cands,setCands]=useState([]);
   const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
-  const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [fSource,setFSource]=useState(""); const [search,setSearch]=useState("");
+  const [fCollege,setFCollege]=useState(""); const [fStatus,setFStatus]=useState(""); const [fSource,setFSource]=useState(""); const [fMinScore,setFMinScore]=useState(""); const [search,setSearch]=useState("");
   const [showCreate,setShowCreate]=useState(false); const [showUpload,setShowUpload]=useState(false);
   const [editDrive,setEditDrive]=useState(null);
   const [confirmState,setConfirmState]=useState(null); // {title,message,onConfirm}
@@ -822,16 +822,16 @@ function DrivesTab() {
     try{
       const [s,c,cl]=await Promise.all([
         fetchCandidateStats({assessmentId}),
-        fetchCandidates({assessmentId,page,limit:20,college:fCollege||undefined,status:fStatus||undefined,source:fSource||undefined,search:search||undefined}),
+        fetchCandidates({assessmentId,page,limit:20,college:fCollege||undefined,status:fStatus||undefined,source:fSource||undefined,minScore:fMinScore||undefined,search:search||undefined}),
         fetchDriveColleges({assessmentId}),
       ]);
       setStats(s.data.data); setCands(c.data.data); setPag(c.data.pagination); setColleges(cl.data.data);
     }catch{} finally{ setLoading(false); }
-  },[page,fCollege,fStatus,fSource,search]);
+  },[page,fCollege,fStatus,fSource,fMinScore,search]);
 
   useEffect(()=>{ if(sel) loadDriveData(sel._id); },[sel,loadDriveData]);
 
-  const openDrive=(d)=>{ setSel(d); setPage(1); setFCollege(""); setFStatus(""); setSearch(""); setPicked(new Set()); };
+  const openDrive=(d)=>{ setSel(d); setPage(1); setFCollege(""); setFStatus(""); setFSource(""); setFMinScore(""); setSearch(""); setPicked(new Set()); };
 
   const sendInvites=async()=>{
     setBusy(true);
@@ -1103,7 +1103,7 @@ function DrivesTab() {
 
       {/* Filters */}
       <div className="ad-toolbar">
-        <input className="ad-search" placeholder="Search name, email…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+        <input className="ad-search" placeholder="Search name, email, USN, Aadhaar, phone…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
         <select className="ad-select" value={fCollege} onChange={e=>{setFCollege(e.target.value);setPage(1);}}>
           <option value="">All Colleges</option>{colleges.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
@@ -1113,6 +1113,7 @@ function DrivesTab() {
         <select className="ad-select" value={fStatus} onChange={e=>{setFStatus(e.target.value);setPage(1);}}>
           <option value="">All Status</option>{STATUS_META.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
+        <input type="number" className="ad-search" style={{width:120}} placeholder="Min score" value={fMinScore} onChange={e=>{setFMinScore(e.target.value);setPage(1);}}/>
       </div>
 
       {/* Bulk actions */}
@@ -1159,10 +1160,112 @@ function DrivesTab() {
   );
 }
 
+// ── Global All-Candidates view (across every drive) ────────────────────────────
+function AllCandidatesTab() {
+  const [rows,setRows]=useState([]); const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
+  const [search,setSearch]=useState(""); const [college,setCollege]=useState(""); const [source,setSource]=useState("");
+  const [status,setStatus]=useState(""); const [minScore,setMinScore]=useState(""); const [driveId,setDriveId]=useState("");
+  const [colleges,setColleges]=useState([]); const [drives,setDrives]=useState([]);
+  const [loading,setLoading]=useState(false); const [exporting,setExporting]=useState(false); const [toast,setToast]=useState(null);
+  const showToast=(t)=>{ setToast(t); setTimeout(()=>setToast(null),6000); };
+
+  const params=()=>({ page, limit:20, search:search||undefined, college:college||undefined, source:source||undefined,
+    status:status||undefined, minScore:minScore||undefined, assessmentId:driveId||undefined });
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{ const r=await fetchCandidates(params()); setRows(r.data.data); setPag(r.data.pagination); }
+    catch{} finally{ setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[page,search,college,source,status,minScore,driveId]);
+
+  useEffect(()=>{ (async()=>{ try{const [cl,dr]=await Promise.all([fetchDriveColleges({}),fetchAssessments()]); setColleges(cl.data.data||[]); setDrives(dr.data.data||[]);}catch{} })(); },[]);
+  useEffect(()=>{ load(); },[load]);
+  useEffect(()=>{ const iv=setInterval(load,15000); return ()=>clearInterval(iv); },[load]); // auto-refresh
+
+  const getResume=(c)=>{ if(c.resume?.url) window.open(c.resume.url,"_blank","noopener"); };
+  const exportAll=async()=>{
+    setExporting(true);
+    try{
+      const r=await fetchCandidates({...params(),page:1,limit:99999});
+      const ws=XLSX.utils.json_to_sheet((r.data.data||[]).map(c=>({
+        Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Course:c.course||"", Branch:c.branch||"",
+        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
+        Drive:c.drive?.name||"", "Drive Type":c.drive?.driveType||"", Source:c.candidateSource||"PRE_REGISTERED",
+        Resume:c.resume?.filename?"Yes":"No", Score:c.score??"-", Total:c.totalMarks??"-",
+        Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
+        Status:c.status, Violations:c.violations?.total||0,
+        Selected:(c.drive?.cutoff!=null&&c.score!=null)?(c.score>=c.drive.cutoff?"Yes":"No"):"-",
+        Completed:fmtDate(c.completedAt),
+      })));
+      const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"All Candidates"); XLSX.writeFile(wb,"MH_All_Candidates.xlsx");
+    }catch(e){ showToast({type:"error",title:"Export failed",lines:[e.message]}); } finally{ setExporting(false); }
+  };
+
+  const toastEl = toast && (
+    <div onClick={()=>setToast(null)} style={{position:"fixed",top:18,right:18,zIndex:9999,maxWidth:340,background:toast.type==="error"?"#FEF2F2":"#ECFDF5",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`,color:toast.type==="error"?"#991B1B":"#065F46",borderRadius:12,padding:"12px 14px",cursor:"pointer"}}>
+      <div style={{fontWeight:800,fontSize:13}}>{toast.title}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      {toastEl}
+      <div className="ad-section-head">
+        <div className="ad-page-title">All Candidates ({pag.total||0})</div>
+        <button className="ad-btn ad-btn--export" onClick={exportAll} disabled={exporting}>{exporting?<><Spinner/>Exporting…</>:"⬇ Export Excel"}</button>
+      </div>
+      <div className="ad-toolbar">
+        <input className="ad-search" placeholder="Search name, email, USN, Aadhaar, phone…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+        <select className="ad-select" value={driveId} onChange={e=>{setDriveId(e.target.value);setPage(1);}}>
+          <option value="">All Drives</option>{drives.map(d=><option key={d._id} value={d._id}>{d.name}</option>)}
+        </select>
+        <select className="ad-select" value={college} onChange={e=>{setCollege(e.target.value);setPage(1);}}>
+          <option value="">All Colleges</option>{colleges.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="ad-select" value={source} onChange={e=>{setSource(e.target.value);setPage(1);}}>
+          <option value="">All Sources</option><option value="WALK_IN">Walk-In</option><option value="PRE_REGISTERED">Pre-Registered</option>
+        </select>
+        <select className="ad-select" value={status} onChange={e=>{setStatus(e.target.value);setPage(1);}}>
+          <option value="">All Status</option>{STATUS_META.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <input type="number" className="ad-search" style={{width:120}} placeholder="Min score" value={minScore} onChange={e=>{setMinScore(e.target.value);setPage(1);}}/>
+      </div>
+      <div className="ad-table-wrap">
+        {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
+        :rows.length===0?<div className="ad-empty">No candidates match these filters.</div>
+        :<table className="ad-table">
+          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>College</th><th>Source</th><th>Drive</th><th>Status</th><th>Score</th><th>Viol.</th><th>CV</th></tr></thead>
+          <tbody>{rows.map((c,i)=>{
+            const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
+            const walkIn=c.candidateSource==="WALK_IN";
+            return (
+              <tr key={c._id}>
+                <td className="ad-td-num">{(page-1)*20+i+1}</td>
+                <td><div className="ad-td-name"><div className="ad-avatar">{c.name.charAt(0)}</div>{c.name}</div></td>
+                <td className="ad-td-sm">{c.email}</td>
+                <td className="ad-td-sm">{c.college}</td>
+                <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
+                <td className="ad-td-sm">{c.drive?.name||"—"}</td>
+                <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
+                <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
+                <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
+                <td>{c.resume?.filename?<button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>getResume(c)}>📄</button>:"—"}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>}
+      </div>
+      <Pagination pag={pag} page={page} setPage={setPage}/>
+    </div>
+  );
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 const TABS = [
   { id:"dashboard", icon:"📊", label:"Dashboard"  },
   { id:"drives",    icon:"🎓", label:"Campus Drives" },
+  { id:"allcand",   icon:"🌐", label:"All Candidates" },
   { id:"students",  icon:"👥", label:"Students"   },
   { id:"attempts",  icon:"📋", label:"Attempts"   },
   { id:"questions", icon:"❓", label:"Questions"  },
@@ -1439,6 +1542,8 @@ function Dashboard({ onLogout }) {
         )}
 
         {tab==="drives" && <DrivesTab/>}
+
+        {tab==="allcand" && <AllCandidatesTab/>}
 
         {tab==="students" && (
           <div>

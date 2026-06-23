@@ -200,3 +200,51 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-1); -webk
   box-shadow: var(--shadow-md, 0 4px 16px rgba(79,70,229,0.1));
 }
 .ad-settings-wrap { max-width: 700px; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   VISUAL REFRESH v4 — richer, less "flat" without breaking the layout
+   ════════════════════════════════════════════════════════════════════════ */
+.ad-page { background:
+  radial-gradient(1200px 400px at 100% -5%, rgba(124,58,237,.10), transparent 60%),
+  radial-gradient(1000px 380px at -5% 0%, rgba(79,70,229,.10), transparent 55%),
+  var(--bg); }
+
+/* Topbar — frosted with a gradient hairline accent on top */
+.ad-topbar { backdrop-filter:saturate(1.4) blur(6px); background:rgba(255,255,255,.86); border-bottom:1px solid var(--border); }
+.ad-topbar::before { content:""; position:absolute; inset:0 0 auto 0; height:3px; background:linear-gradient(90deg,var(--primary),var(--secondary),#EC4899); }
+.ad-topbar-logo { box-shadow:0 6px 16px rgba(124,58,237,.35); }
+
+/* Tabs — pill highlight on the active tab */
+.ad-tab { border-radius:10px 10px 0 0; }
+.ad-tab--active { background:linear-gradient(180deg,var(--primary-lt),transparent); }
+.ad-tab--active::after { content:""; }
+
+/* Page content gently fades/rises in on tab switch */
+.ad-content > * { animation:adFade .28s ease both; }
+@keyframes adFade { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+
+/* Stat cards — soft gradient surface, accent glow, lift on hover */
+.ad-stat-card {
+  background:linear-gradient(160deg,#ffffff,#FBFAFF);
+  position:relative; overflow:hidden;
+}
+.ad-stat-card::after {
+  content:""; position:absolute; right:-30px; top:-30px; width:90px; height:90px; border-radius:50%;
+  background:radial-gradient(circle, currentColor, transparent 70%); opacity:.06; pointer-events:none;
+}
+.ad-stat-card:hover { transform:translateY(-3px); box-shadow:0 12px 28px rgba(79,70,229,.16); }
+.ad-stat-val { letter-spacing:-.5px; }
+
+/* Table — gradient header, zebra rows, smooth hover */
+.ad-table thead th { background:linear-gradient(180deg,#F4F2FF,#FBFAFF); position:sticky; top:0; }
+.ad-table tbody tr:nth-child(even) td { background:rgba(248,247,255,.55); }
+.ad-table tbody tr { transition:background .12s; }
+.ad-table tr:hover td { background:#F0EEFF !important; }
+.ad-table-wrap { box-shadow:0 6px 22px rgba(79,70,229,.08); }
+
+/* Buttons get a touch more pop */
+.ad-btn--export:hover:not(:disabled), .ad-btn--outline:hover { transform:translateY(-1px); }
+
+/* Section title with a leading gradient bar */
+.ad-page-title { display:flex; align-items:center; gap:10px; }
+.ad-page-title::before { content:""; width:5px; height:22px; border-radius:4px; background:linear-gradient(180deg,var(--primary),var(--secondary)); }

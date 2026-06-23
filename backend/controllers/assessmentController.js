@@ -298,25 +298,34 @@ exports.listCandidates = async (req, res) => {
   try {
     const page   = Math.max(1, parseInt(req.query.page) || 1);
     const limit  = Math.min(500, parseInt(req.query.limit) || 20);
-    const { assessmentId, college, status, search, source } = req.query;
+    const { assessmentId, college, status, search, source, minScore } = req.query;
 
     const filter = {};
-    if (assessmentId) filter.assessmentId = assessmentId;
+    if (assessmentId) filter.assessmentId = assessmentId;   // omit → global (all drives)
     if (college) filter.college = college;
     if (status) filter.status = status;
     if (source) filter.candidateSource = source;
+    if (minScore !== undefined && minScore !== "") filter.score = { $gte: parseInt(minScore) || 0 };
     if (search) {
       const re = new RegExp(escapeRegex(String(search).trim()), "i");
-      filter.$or = [{ name: re }, { email: re }, { college: re }];
+      filter.$or = [{ name: re }, { email: re }, { college: re }, { aadhaar: re }, { phone: re }, { usn: re }];
     }
 
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
         .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size resume.url status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
+        .populate("assessmentId", "name driveType cutoff")  // drive context for the global view
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
     ]);
-    const data = rows.map(c => ({ ...c, link: buildLink(c.token), token: undefined }));
+    const data = rows.map(c => ({
+      ...c,
+      drive: c.assessmentId && typeof c.assessmentId === "object"
+        ? { _id: c.assessmentId._id, name: c.assessmentId.name, driveType: c.assessmentId.driveType, cutoff: c.assessmentId.cutoff }
+        : null,
+      assessmentId: c.assessmentId?._id || c.assessmentId,
+      link: buildLink(c.token), token: undefined,
+    }));
     res.json({ success: true, data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     console.error("listCandidates:", err);
