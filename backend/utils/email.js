@@ -170,6 +170,8 @@ async function sendMail({ to, subject, html, text, attachments }) {
 const BRAND = "M H FOUNDATION";
 const HIRING_PARTNER = "Inference Labs Private Limited";
 const PRIMARY = "#1a56db";
+// WhatsApp community group candidates are invited to join after completing the test.
+const WHATSAPP_GROUP = process.env.WHATSAPP_GROUP_URL || "https://chat.whatsapp.com/EHaZJcJ4NNu5XNHlukwitp";
 
 // Escape values interpolated into email HTML (names come from CSV — untrusted).
 function esc(s) {
@@ -305,8 +307,33 @@ function thankYouHtml({ name, assessmentName }) {
           We appreciate your time and effort. Best of luck!
         </p>
       </div>
+      ${whatsappBlock()}
     </div>`;
   return shell(inner);
+}
+
+// ── WhatsApp community invite (decorated CTA used in the thank-you email) ──────
+function whatsappBlock() {
+  const safe = encodeURI(WHATSAPP_GROUP);
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px;">
+      <tr><td style="padding:1px;border-radius:16px;background:linear-gradient(135deg,#25D366,#128C7E);">
+        <div style="background:#ffffff;border-radius:15px;padding:24px 22px;text-align:center;">
+          <div style="font-size:34px;line-height:1;margin-bottom:8px;">📱💬</div>
+          <h3 style="margin:0 0 6px;color:#075E54;font-size:17px;font-weight:800;">Join Our WhatsApp Community</h3>
+          <p style="margin:0 0 16px;color:#4b5563;font-size:13.5px;line-height:1.6;">
+            Stay updated with your <strong>results</strong>, interview rounds, and the next steps of your
+            recruitment journey with <strong>${BRAND}</strong>. Don't miss any important announcement!
+          </p>
+          <a href="${safe}" style="background:linear-gradient(135deg,#25D366,#128C7E);color:#ffffff;padding:14px 36px;border-radius:30px;text-decoration:none;font-weight:800;font-size:15px;display:inline-block;box-shadow:0 6px 16px rgba(37,211,102,.35);">
+            ✅ Join WhatsApp Group
+          </a>
+          <p style="margin:14px 0 0;color:#9ca3af;font-size:11px;line-height:1.5;word-break:break-all;">
+            Or open this link:<br/><span style="color:#128C7E;">${safe}</span>
+          </p>
+        </div>
+      </td></tr>
+    </table>`;
 }
 
 // Assessment-LINK email (this is what the scheduler sends at link-send time).
@@ -348,7 +375,7 @@ async function sendThankYouEmail(candidate, assessment) {
     to: candidate.email,
     subject: `Assessment Completed — ${assessment?.name || ""} | ${BRAND}`,
     html: thankYouHtml({ name: candidate.name, assessmentName: assessment?.name }),
-    text: `Thank you ${candidate.name}! Your responses for ${assessment?.name || "the assessment"} have been recorded.\n\n${BRAND} · ${HIRING_PARTNER}`,
+    text: `Thank you ${candidate.name}! Your responses for ${assessment?.name || "the assessment"} have been recorded.\n\nJoin our WhatsApp community to stay updated with your results and next steps:\n${WHATSAPP_GROUP}\n\n${BRAND} · ${HIRING_PARTNER}`,
   });
 }
 
