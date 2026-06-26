@@ -346,10 +346,13 @@ export default function AssessmentPage() {
     }
   }, [camOn, phase]);
 
-  // Pre-grant camera on the Rules page — getting the permission prompt OUT OF THE
-  // WAY here means requestFullscreen() on "Proceed" is not interrupted (root-cause fix).
+  // Pre-grant camera on the Rules page — ONLY if this drive uses the camera.
+  // When Camera Monitoring is OFF we never touch getUserMedia, so desktops with
+  // no webcam can take the assessment without any permission prompt.
   useEffect(() => {
-    if (phase === "rules" && !streamRef.current) { startCamera(); }
+    if (phase === "rules" && !streamRef.current && (secRef.current || {}).cameraMonitoring !== false) {
+      startCamera();
+    }
   }, [phase, startCamera]);
 
   /* ── Verification: exactly one face required ──────────────────────────────── */
@@ -377,10 +380,12 @@ export default function AssessmentPage() {
 
   const beginScanning = useCallback(async () => {
     const sec = secRef.current || {};
-    const wantCamera = sec.cameraMonitoring !== false || sec.faceVerification !== false;
+    // Camera Monitoring is the MASTER switch. Off → no camera, and (since face checks
+    // need a camera) no face verification either. Some venues have webcam-less desktops.
+    const wantCamera = sec.cameraMonitoring !== false;
     setVerifyStatus("loading"); setVerifyMsg(""); setFaceCount(null); okFramesRef.current = 0;
 
-    // Camera disabled for this drive → skip straight to the paper.
+    // Camera disabled for this drive → skip straight to the paper (no permission prompt).
     if (!wantCamera) {
       setVerifyStatus("verified");
       await new Promise(r => setTimeout(r, 500));
@@ -983,7 +988,7 @@ export default function AssessmentPage() {
             <button className="asmt-start-btn" onClick={() => { setResumeMode(isResume); setAgreed(false); setPhase("rules"); }}>
               {isResume ? "Resume Assessment" : "Start Assessment"}
             </button>
-            <p className="asmt-fs-note">You'll review the rules, then enter fullscreen with your camera on.</p>
+            <p className="asmt-fs-note">You'll review the rules, then enter fullscreen{info?.security?.cameraMonitoring !== false ? " with your camera on" : ""}.</p>
           </div>
         </div>
       </div>
@@ -1008,14 +1013,18 @@ export default function AssessmentPage() {
               </div>
             </div>
             <ul className="asmt-rules-list">
-              {RULES.map(([icon, text]) => (
+              {RULES
+                .filter(([icon]) => info?.security?.cameraMonitoring !== false || (icon !== "📷" && icon !== "🎥"))
+                .map(([icon, text]) => (
                 <li key={text} className="asmt-rule"><span className="asmt-rule-icon">{icon}</span><span>{text}</span></li>
               ))}
             </ul>
-            <div className={`asmt-cam-status ${camReady ? "asmt-cam-status--ok" : camDenied ? "asmt-cam-status--err" : ""}`}>
-              {camReady ? "🎥 Camera ready" : camDenied ? "⚠ Camera blocked — please allow camera access (required for this assessment)." : "🎥 Requesting camera access…"}
-              {camDenied && <button className="asmt-cam-retry" onClick={() => startCamera()}>Retry camera</button>}
-            </div>
+            {info?.security?.cameraMonitoring !== false && (
+              <div className={`asmt-cam-status ${camReady ? "asmt-cam-status--ok" : camDenied ? "asmt-cam-status--err" : ""}`}>
+                {camReady ? "🎥 Camera ready" : camDenied ? "⚠ Camera blocked — please allow camera access (required for this assessment)." : "🎥 Requesting camera access…"}
+                {camDenied && <button className="asmt-cam-retry" onClick={() => startCamera()}>Retry camera</button>}
+              </div>
+            )}
             <label className="asmt-agree">
               <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} />
               <span>I have read and understood all assessment instructions.</span>
