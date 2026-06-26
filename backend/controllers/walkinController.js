@@ -36,7 +36,9 @@ function publicDrive(d) {
     colleges: Array.isArray(d.colleges) ? d.colleges : [],   // walk-in college dropdown options
     startAt: d.startAt || null,
     endAt: d.endAt || null,
-    capacity: d.maxCandidates != null ? { current: d.walkInCount, max: d.maxCandidates } : null,
+    // NOTE: registered count / capacity is intentionally NOT exposed publicly —
+    // only admins see registration numbers (admin dashboard). Capacity is still
+    // enforced server-side in registerWalkIn.
   };
 }
 

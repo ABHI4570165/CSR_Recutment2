@@ -181,16 +181,7 @@ export default function WalkInPortal() {
                 </div>
               )}
 
-              <div className="wp-grid">
-                {FIELDS.filter(f => f[0] !== "testCode").map(inputFor)}
-                <div className="wp-field wp-field--full">
-                  <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
-                  <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
-                  {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
-                  {fieldErr.resume && <span className="wp-field-err">{fieldErr.resume}</span>}
-                </div>
-              </div>
-
+              {/* Test code FIRST — verifying it loads the college dropdown below. */}
               <div className="wp-codebox">
                 {inputFor(["testCode", "Test Code", "text", true])}
                 {codeChecking && <div className="wp-checking"><span className="wp-spin" /> Verifying test code…</div>}
@@ -199,11 +190,20 @@ export default function WalkInPortal() {
                     <div className="wp-drive-name">✓ {drive.assessmentName}</div>
                     <div className="wp-drive-meta">
                       {drive.durationMinutes} minutes{drive.college ? ` · ${drive.college}` : ""}
-                      {drive.capacity ? ` · ${drive.capacity.current}/${drive.capacity.max} registered` : ""}
                     </div>
                   </div>
                 )}
                 {codeMsg && <div className="wp-err" style={{ marginTop: 8 }}>{codeMsg}</div>}
+              </div>
+
+              <div className="wp-grid">
+                {FIELDS.filter(f => f[0] !== "testCode").map(inputFor)}
+                <div className="wp-field wp-field--full">
+                  <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
+                  <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
+                  {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
+                  {fieldErr.resume && <span className="wp-field-err">{fieldErr.resume}</span>}
+                </div>
               </div>
 
               <label className="wp-tnc">
