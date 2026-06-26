@@ -84,6 +84,7 @@ const candidateSchema = new mongoose.Schema({
   // Uploaded resume. Preferred: Cloudinary (url + publicId). Fallback: base64 `data`.
   resume: {
     filename:   { type: String },
+    ext:        { type: String },   // file extension (pdf/doc/docx) for correct naming + preview
     mime:       { type: String },
     url:        { type: String },   // Cloudinary secure URL (preferred)
     publicId:   { type: String },   // Cloudinary public_id (for deletion)

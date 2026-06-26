@@ -49,18 +49,20 @@ function parseResume(r) {
   if (bytes > MAX_RESUME_BYTES) return { _tooBig: true };
   const filename = String(r.filename || "resume").slice(0, 200);
   const mime = String(r.mime || "application/octet-stream").slice(0, 100);
+  const extM = filename.match(/\.([a-z0-9]+)$/i);
+  const ext = extM ? extM[1].toLowerCase() : (mime.includes("pdf") ? "pdf" : mime.includes("word") ? "docx" : "");
   const dataUrl = data.startsWith("data:") ? data : `data:${mime};base64,${base64}`;
-  return { filename, mime, base64, dataUrl, size: bytes };
+  return { filename, ext, mime, base64, dataUrl, size: bytes };
 }
 
 // Store a resume → Cloudinary if configured (url only), else base64 fallback in Mongo.
 async function storeResume(parsed) {
   if (!parsed) return undefined;
-  const base = { filename: parsed.filename, mime: parsed.mime, size: parsed.size, uploadedAt: new Date() };
+  const base = { filename: parsed.filename, ext: parsed.ext, mime: parsed.mime, size: parsed.size, uploadedAt: new Date() };
   if (cloudinaryConfigured()) {
     try {
-      const { url, publicId } = await uploadResume(parsed.dataUrl, parsed.filename);
-      return { ...base, url, publicId };
+      const { url, publicId, ext } = await uploadResume(parsed.dataUrl, parsed.filename);
+      return { ...base, ext: ext || parsed.ext, url, publicId };
     } catch (e) {
       console.warn("[walkin] Cloudinary upload failed, falling back to DB:", e.message);
     }

@@ -5,16 +5,16 @@ import "./WalkInPortal.css";
 
 const FIELDS = [
   ["name",     "Full Name",       "text",  true],
-  ["usn",      "USN",             "text",  false],
+  ["usn",      "USN",             "text",  true],
   ["email",    "Email",           "email", true],
   ["phone",    "Mobile Number",   "tel",   true],
-  ["course",   "Course",          "text",  false],
-  ["branch",   "Branch",          "text",  false],
+  ["course",   "Course",          "text",  true],
+  ["branch",   "Branch",          "text",  true],
   ["college",  "College Name",    "text",  true],
-  ["gender",   "Gender",          "select",false],
-  ["dob",      "Date of Birth",   "date",  false],
-  ["aadhaar",  "Aadhaar Number",  "text",  false],
-  ["location", "Location",        "text",  false],
+  ["gender",   "Gender",          "select",true],
+  ["dob",      "Date of Birth",   "date",  true],
+  ["aadhaar",  "Aadhaar Number",  "text",  true],
+  ["location", "Address",         "text",  true],   // label "Address"; data key stays `location`
 ];
 
 const AADHAAR_RE = /^\d{12}$/;
@@ -38,6 +38,7 @@ export default function WalkInPortal() {
   const [fieldErr, setFieldErr] = useState({});
   const [drive, setDrive] = useState(null);
   const [codeMsg, setCodeMsg] = useState("");
+  const [codeChecking, setCodeChecking] = useState(false);
   const [restored, setRestored] = useState(false);
   // resume sub-window
   const [resumeForm, setResumeForm] = useState({ testCode: "", email: "", aadhaar: "" });
@@ -62,32 +63,41 @@ export default function WalkInPortal() {
   const checkCode = async () => {
     const code = form.testCode.trim();
     if (!code) return;
+    setCodeChecking(true); setCodeMsg("");
     try {
       const r = await validateTestCode({ testCode: code });
       setDrive(r.data.data); setCodeMsg(""); setFieldErr((fe) => ({ ...fe, testCode: "" }));
-    } catch (e) { setDrive(null); setCodeMsg(e.message || "Invalid test code."); }
+    } catch (e) { setDrive(null); setCodeMsg(e.message || "Unable to verify your test code. Please check the code and try again."); }
+    finally { setCodeChecking(false); }
   };
 
   const onResume = (e) => {
     const f = e.target.files?.[0];
     if (!f) { setResume(null); return; }
-    if (f.size > MAX_RESUME_MB * 1024 * 1024) { setErr(`Resume must be under ${MAX_RESUME_MB} MB.`); e.target.value = ""; return; }
+    const okExt = /\.(pdf|docx?|DOC|DOCX|PDF)$/i.test(f.name);
+    if (!okExt) { setFieldErr((fe) => ({ ...fe, resume: "Only PDF, DOC or DOCX files are allowed" })); e.target.value = ""; setResume(null); return; }
+    if (f.size > MAX_RESUME_MB * 1024 * 1024) { setFieldErr((fe) => ({ ...fe, resume: `Resume must be under ${MAX_RESUME_MB} MB` })); e.target.value = ""; setResume(null); return; }
     const reader = new FileReader();
-    reader.onload = () => setResume({ filename: f.name, mime: f.type || "application/octet-stream", data: String(reader.result) });
+    reader.onload = () => setResume({ filename: f.name, mime: f.type || "application/octet-stream", data: String(reader.result), size: f.size });
     reader.readAsDataURL(f);
-    setErr("");
+    setErr(""); setFieldErr((fe) => ({ ...fe, resume: "" }));
   };
 
   const validate = () => {
     const fe = {};
-    if (!form.name.trim()) fe.name = "Required";
+    // All these are mandatory.
+    ["name", "usn", "course", "branch", "college", "gender", "dob", "location"].forEach((k) => {
+      if (!String(form[k] || "").trim()) fe[k] = "Required";
+    });
     if (!form.email.trim()) fe.email = "Required";
-    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) fe.email = "Invalid email";
-    if (!form.college.trim()) fe.college = "Required";
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) fe.email = "Enter a valid email address";
     if (!form.phone.trim()) fe.phone = "Required";
-    else if (!PHONE_RE.test(form.phone.replace(/\s/g, ""))) fe.phone = "10 digits";
+    else if (!PHONE_RE.test(form.phone.replace(/\s/g, ""))) fe.phone = "Enter a 10-digit mobile number";
+    if (!form.aadhaar.trim()) fe.aadhaar = "Required";
+    else if (!AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "Enter a 12-digit Aadhaar number";
+    if (form.dob && new Date(form.dob) > new Date()) fe.dob = "Date of birth cannot be in the future";
     if (!form.testCode.trim()) fe.testCode = "Required";
-    if (form.aadhaar && !AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "12 digits";
+    if (!resume) fe.resume = "Resume is required (PDF, DOC or DOCX)";
     return fe;
   };
 
@@ -123,6 +133,8 @@ export default function WalkInPortal() {
       ) : (
         <input className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} type={type} value={form[k]}
           onChange={set(k)} onBlur={k === "testCode" ? checkCode : undefined}
+          max={type === "date" ? new Date().toISOString().slice(0, 10) : undefined}
+          inputMode={k === "phone" || k === "aadhaar" ? "numeric" : undefined}
           placeholder={k === "testCode" ? "e.g. MH001" : ""} />
       )}
       {fieldErr[k] && <span className="wp-field-err">{fieldErr[k]}</span>}
@@ -159,14 +171,16 @@ export default function WalkInPortal() {
               <div className="wp-grid">
                 {FIELDS.filter(f => f[0] !== "testCode").map(inputFor)}
                 <div className="wp-field wp-field--full">
-                  <label className="wp-label">Resume (PDF/DOC, max {MAX_RESUME_MB} MB)</label>
-                  <input className="wp-input" type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
+                  <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
+                  <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
                   {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
+                  {fieldErr.resume && <span className="wp-field-err">{fieldErr.resume}</span>}
                 </div>
               </div>
 
               <div className="wp-codebox">
                 {inputFor(["testCode", "Test Code", "text", true])}
+                {codeChecking && <div className="wp-checking"><span className="wp-spin" /> Verifying test code…</div>}
                 {drive && (
                   <div className="wp-drive">
                     <div className="wp-drive-name">✓ {drive.assessmentName}</div>
@@ -184,8 +198,8 @@ export default function WalkInPortal() {
                 <span>I agree to the Terms &amp; Conditions and consent to camera-based proctoring during this assessment.</span>
               </label>
 
-              {err && <div className="wp-err">{err}</div>}
-              <button className="wp-btn" onClick={submit} disabled={busy}>{busy ? "Starting…" : "START ASSESSMENT"}</button>
+              {err && <div className="wp-err wp-shake">{err}</div>}
+              <button className="wp-btn" onClick={submit} disabled={busy}>{busy ? <><span className="wp-spin" /> Starting…</> : "START ASSESSMENT"}</button>
               <p className="wp-note">On start you'll enter fullscreen with your camera on. A laptop/desktop and a quiet room are required.</p>
             </>
           ) : (
@@ -207,11 +221,23 @@ export default function WalkInPortal() {
                 </div>
               </div>
               <p className="wp-note" style={{ textAlign: "left", margin: "4px 0 12px" }}>Enter your email <strong>or</strong> Aadhaar (either is enough).</p>
-              {err && <div className="wp-err">{err}</div>}
-              <button className="wp-btn" onClick={doResume} disabled={busy}>{busy ? "Finding…" : "RESUME ASSESSMENT"}</button>
+              {err && <div className="wp-err wp-shake">{err}</div>}
+              <button className="wp-btn" onClick={doResume} disabled={busy}>{busy ? <><span className="wp-spin" /> Finding…</> : "RESUME ASSESSMENT"}</button>
             </>
           )}
+
+          {busy && (
+            <div className="wp-overlay">
+              <div className="wp-spin wp-spin--lg" />
+              <div className="wp-overlay-text">{mode === "register" ? "Setting up your assessment…" : "Finding your registration…"}</div>
+            </div>
+          )}
         </div>
+
+        <footer className="wp-footer">
+          © {new Date().getFullYear()} M H FOUNDATION · In association with Inference Labs Private Limited<br />
+          For assistance, please contact your assessment coordinator.
+        </footer>
       </div>
     </div>
   );

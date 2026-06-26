@@ -45,25 +45,42 @@ adminApi.interceptors.request.use((cfg) => {
 });
 
 // ── Error normaliser ──────────────────────────────────────────────────────────
+// Candidates/admins must NEVER see API URLs, env vars, axios internals, stack
+// traces or "Network Error". Technical detail goes to the browser console ONLY;
+// the thrown Error carries a clean, human-friendly message for the UI.
+const FRIENDLY = {
+  offline:  "Unable to connect. Please check your internet connection and try again.",
+  timeout:  "Your connection looks slow or unstable. Please try again.",
+  server:   "The service is temporarily unavailable. Please try again in a few moments. If this continues, inform your assessment coordinator.",
+  generic:  "Something went wrong. Please try again.",
+};
 const handleErr = (err) => {
-  // No response = network error (CORS blocked, server down, wrong URL)
+  // Always log the real detail for developers (console + backend logs only).
+  if (import.meta.env.DEV) console.error("[api]", err?.config?.url, err?.code, err?.message, err?.response?.status);
+
+  // No response = network/CORS/server-down/timeout — never expose the URL.
   if (!err.response) {
     const isTimeout = err.code === "ECONNABORTED";
-    const msg = isTimeout
-      ? "Request timed out. Check your internet connection."
-      : `Cannot reach server. Current API URL: "${BASE}". ` +
-        `Check VITE_API_URL environment variable. (${err.message})`;
-    const e = new Error(msg);
+    const e = new Error(isTimeout ? FRIENDLY.timeout : FRIENDLY.offline);
     e.isNetworkError = true;
+    e.status = 0;
     throw e;
   }
 
-  // Server responded with an error status
-  const msg = err.response.data?.message || err.message || "Server error";
-  const e   = new Error(msg);
-  e.status  = err.response.status;
-  // Spread all extra fields (missing, received, etc.) onto the error
-  Object.assign(e, err.response.data || {});
+  const status = err.response.status;
+  const data   = err.response.data || {};
+  // Use the server's friendly message for expected 4xx (validation, test-code, capacity,
+  // window state…) — those are written for end users. Hide raw 5xx detail.
+  let message;
+  if (status >= 500) message = FRIENDLY.server;
+  else message = (typeof data.message === "string" && data.message) ? data.message : FRIENDLY.generic;
+
+  const e  = new Error(message);
+  e.status = status;
+  // Carry programmatic fields (state, missing, distance, radius…) but NOT a raw message
+  // that could contain internals — message is already sanitised above.
+  Object.assign(e, data);
+  e.message = message;
   throw e;
 };
 
@@ -132,6 +149,7 @@ export const fetchDriveColleges   = (p)     => adminApi.get("/assessments/colleg
 export const setCandidateStatus   = (d)     => adminApi.patch("/assessments/candidates/status", d);
 export const deleteCandidate      = (id)    => adminApi.delete(`/assessments/candidates/${id}`);
 export const downloadResume       = (id)    => adminApi.get(`/assessments/candidates/${id}/resume`, { responseType: "blob" });
+export const downloadResumeFile   = (id)    => adminApi.get(`/assessments/candidates/${id}/resume?download=1`, { responseType: "blob" });
 
 // ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────
 // No auth header — the opaque token IS the credential.

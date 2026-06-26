@@ -25,16 +25,22 @@ let configured = false;
 
 function cloudinaryConfigured() { return configured; }
 
-// Upload a resume (data URL) to Cloudinary as a raw file. Returns { url, publicId }.
+// Upload a resume (data URL) to Cloudinary as a raw file. Returns { url, publicId, ext }.
+// IMPORTANT: keep the original extension in the public_id so the delivery URL ends
+// in .pdf/.doc/.docx — otherwise browsers receive octet-stream and the file is
+// downloaded without an extension (unreadable). Fixes the resume-viewing bug.
 async function uploadResume(dataUrl, filename = "resume") {
+  const m = String(filename).match(/\.([a-z0-9]+)$/i);
+  const ext = m ? `.${m[1].toLowerCase()}` : "";
+  const base = String(filename).replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/gi, "_").slice(0, 60) || "resume";
   const res = await cloudinary.uploader.upload(dataUrl, {
     resource_type: "raw",                // PDFs/DOCs delivered as the original file
     folder: process.env.CLOUDINARY_FOLDER || "mh_resumes",
-    public_id: `${Date.now()}_${String(filename).replace(/\.[^.]+$/, "").replace(/[^a-z0-9]+/gi, "_").slice(0, 60)}`,
+    public_id: `${Date.now()}_${base}${ext}`,   // keep extension on the URL
     use_filename: false,
     overwrite: false,
   });
-  return { url: res.secure_url, publicId: res.public_id };
+  return { url: res.secure_url, publicId: res.public_id, ext: ext.replace(".", "") };
 }
 
 async function deleteResume(publicId) {

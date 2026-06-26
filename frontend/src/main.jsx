@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./styles/global.css";
 
 // Lazy-loaded routes → smaller initial bundle, faster first paint under load.
@@ -10,6 +10,7 @@ const QuizPage       = lazy(() => import("./pages/QuizPage"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AssessmentPage = lazy(() => import("./pages/AssessmentPage"));
 const WalkInPortal   = lazy(() => import("./pages/WalkInPortal"));
+const ErrorPage      = lazy(() => import("./pages/ErrorPage"));
 
 const Loading = () => (
   <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#6b7280" }}>
@@ -36,7 +37,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/ready"    element={<QuizReadyPage />} />
           <Route path="/quiz"     element={<QuizPage />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Friendly 404 for unknown links (candidates never land on the admin page) */}
+          <Route path="*" element={<ErrorPage code="404" />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

@@ -6,7 +6,7 @@ import {
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, testEmail,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail,
   getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
@@ -888,6 +888,7 @@ function DrivesTab() {
   const [editDrive,setEditDrive]=useState(null);
   const [confirmState,setConfirmState]=useState(null); // {title,message,onConfirm}
   const [confirmBusy,setConfirmBusy]=useState(false);
+  const [resumeView,setResumeView]=useState(null); // candidate whose resume is open
   const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
@@ -1023,9 +1024,12 @@ function DrivesTab() {
     return ()=>clearInterval(iv);
   },[sel,loadDriveData,loadDrives]);
 
-  const confirmEl = confirmState && (
-    <ConfirmModal title={confirmState.title} message={confirmState.message}
-      onConfirm={runConfirm} onCancel={()=>setConfirmState(null)} loading={confirmBusy} />
+  const confirmEl = (
+    <>
+      {confirmState && <ConfirmModal title={confirmState.title} message={confirmState.message}
+        onConfirm={runConfirm} onCancel={()=>setConfirmState(null)} loading={confirmBusy} />}
+      {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
+    </>
   );
 
   const toastEl = toast && (
@@ -1234,7 +1238,7 @@ function DrivesTab() {
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`} title={violBreakdown(c)}>{c.violations?.total||0}</span>{(c.refreshCount||0)>0&&<span title="Refreshes" style={{fontSize:11,color:"#D97706",marginLeft:4}}>↻{c.refreshCount}</span>}</td>
                 <td style={{display:"flex",gap:4}}>
                   <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button>
-                  {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>getResume(c)}>📄 CV</button>}
+                  {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄 CV</button>}
                 </td>
                 <td><button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>removeCand(c._id)}>Delete</button></td>
               </tr>
@@ -1243,6 +1247,91 @@ function DrivesTab() {
         </table>}
       </div>
       <Pagination pag={pag} page={page} setPage={setPage}/>
+    </div>
+  );
+}
+
+// ── Resume Viewer modal (Phase 6/8) ────────────────────────────────────────────
+function resumeName(c) {
+  const ext = (c.resume?.ext || (c.resume?.filename || "").split(".").pop() || "pdf").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const name = String(c.name || "Candidate").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
+  const usn = c.usn ? `_${String(c.usn).replace(/[^a-z0-9]+/gi, "_")}` : "";
+  return `${name}${usn}_Resume.${ext}`;
+}
+function ResumeViewer({ candidate, onClose }) {
+  const [url, setUrl] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [rot, setRot] = useState(0);
+  const ext = (candidate.resume?.ext || (candidate.resume?.filename || "").split(".").pop() || "").toLowerCase();
+  const isPdf = ext === "pdf" || (candidate.resume?.mime || "").includes("pdf");
+  const isDoc = ["doc", "docx"].includes(ext) || (candidate.resume?.mime || "").includes("word");
+  const fname = resumeName(candidate);
+
+  useEffect(() => {
+    let obj;
+    (async () => {
+      try {
+        const r = await downloadResume(candidate._id);
+        obj = URL.createObjectURL(r.data);
+        setUrl(obj);
+      } catch (e) { setErr(e.message || "Resume is temporarily unavailable."); }
+      finally { setLoading(false); }
+    })();
+    return () => { if (obj) URL.revokeObjectURL(obj); };
+  }, [candidate._id]);
+
+  const download = async () => {
+    try {
+      const r = await downloadResumeFile(candidate._id);
+      const u = URL.createObjectURL(r.data);
+      const a = document.createElement("a"); a.href = u; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
+    } catch { /* surfaced by viewer */ }
+  };
+  const printIt = () => { const f = document.getElementById("ad-resume-frame"); try { f?.contentWindow?.focus(); f?.contentWindow?.print(); } catch { window.open(url, "_blank"); } };
+
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <div className="ad-modal" style={{ maxWidth: 920, width: "95%", height: "90vh", display: "flex", flexDirection: "column", padding: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: 8 }}>
+          <div className="ad-modal-title" style={{ margin: 0 }}>📄 {candidate.name} · Resume</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {isPdf && url && <>
+              <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={() => setZoom(z => Math.max(0.5, +(z - 0.15).toFixed(2)))}>－</button>
+              <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={() => setZoom(z => Math.min(2.5, +(z + 0.15).toFixed(2)))}>＋</button>
+              <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={() => setRot(r => (r + 90) % 360)}>⟳ Rotate</button>
+              <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={printIt}>🖨 Print</button>
+            </>}
+            {url && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={() => window.open(url, "_blank", "noopener")}>↗ New Tab</button>}
+            <button className="ad-btn ad-btn--sm ad-btn--export" onClick={download}>⬇ Download</button>
+            <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={onClose}>✕ Close</button>
+          </div>
+        </div>
+        <div style={{ padding: "6px 18px", fontSize: 12, color: "var(--text-3)", borderBottom: "1px solid var(--border)" }}>
+          {candidate.resume?.filename || fname}
+          {candidate.resume?.size ? ` · ${(candidate.resume.size / 1024).toFixed(0)} KB` : ""}
+          {ext ? ` · ${ext.toUpperCase()}` : ""}
+          {candidate.resume?.uploadedAt ? ` · uploaded ${fmtDate(candidate.resume.uploadedAt)}` : ""}
+        </div>
+        <div style={{ flex: 1, overflow: "auto", background: "#525659", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+          {loading ? <div style={{ color: "#fff", margin: "auto", display: "flex", gap: 10, alignItems: "center" }}><Spinner /> Loading resume…</div>
+            : err ? <div style={{ color: "#fff", margin: "auto", textAlign: "center" }}>{err}<br /><button className="ad-btn ad-btn--export" style={{ marginTop: 12 }} onClick={download}>⬇ Download Resume</button></div>
+            : isPdf && url ? (
+              <iframe id="ad-resume-frame" title="resume" src={url}
+                style={{ width: `${100 / zoom}%`, height: `${100 / zoom}%`, border: "none", transform: `scale(${zoom}) rotate(${rot}deg)`, transformOrigin: "top center", background: "#fff" }} />
+            ) : isDoc && candidate.resume?.url ? (
+              <iframe title="resume" src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(candidate.resume.url)}`}
+                style={{ width: "100%", height: "100%", border: "none", background: "#fff" }} />
+            ) : (
+              <div style={{ color: "#fff", margin: "auto", textAlign: "center" }}>
+                Preview unavailable for this file type.<br />
+                <button className="ad-btn ad-btn--export" style={{ marginTop: 12 }} onClick={download}>⬇ Download Resume</button>
+              </div>
+            )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1270,7 +1359,7 @@ function AllCandidatesTab() {
   useEffect(()=>{ load(); },[load]);
   useEffect(()=>{ const iv=setInterval(load,15000); return ()=>clearInterval(iv); },[load]); // auto-refresh
 
-  const getResume=(c)=>{ if(c.resume?.url) window.open(c.resume.url,"_blank","noopener"); };
+  const [resumeView,setResumeView]=useState(null);
   const exportAll=async()=>{
     setExporting(true);
     try{
@@ -1300,6 +1389,7 @@ function AllCandidatesTab() {
   return (
     <div>
       {toastEl}
+      {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
       <div className="ad-section-head">
         <div className="ad-page-title">All Candidates ({pag.total||0})</div>
         <button className="ad-btn ad-btn--export" onClick={exportAll} disabled={exporting}>{exporting?<><Spinner/>Exporting…</>:"⬇ Export Excel"}</button>
@@ -1339,7 +1429,7 @@ function AllCandidatesTab() {
                 <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
-                <td>{c.resume?.filename?<button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>getResume(c)}>📄</button>:"—"}</td>
+                <td>{c.resume?.filename?<button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄</button>:"—"}</td>
               </tr>
             );
           })}</tbody>

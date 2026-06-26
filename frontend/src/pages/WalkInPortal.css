@@ -46,4 +46,18 @@
 .wp-actions .wp-btn { margin-top: 0; }
 .wp-actions .wp-btn:last-child { flex: 1; }
 .wp-note { font-size: 12px; color: #6b7280; text-align: center; margin: 14px 0 0; }
+/* ── V3.3 polish: spinners, overlay, footer, animations ── */
+.wp-card { position: relative; }
+.wp-spin { display: inline-block; width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; animation: wp-spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+.wp-spin--lg { width: 38px; height: 38px; border-width: 3px; border-color: #c7d2fe; border-top-color: #1a56db; margin: 0 0 12px; }
+@keyframes wp-spin { to { transform: rotate(360deg); } }
+.wp-checking { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: #1a56db; font-weight: 600; }
+.wp-checking .wp-spin { border-color: #c7d2fe; border-top-color: #1a56db; }
+.wp-overlay { position: absolute; inset: 0; background: rgba(255,255,255,.82); backdrop-filter: blur(2px); border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 5; animation: wp-fade .2s ease; }
+.wp-overlay-text { font-size: 14px; font-weight: 700; color: #1e3a8a; }
+@keyframes wp-fade { from { opacity: 0; } to { opacity: 1; } }
+.wp-shake { animation: wp-shake .3s ease; }
+@keyframes wp-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.wp-footer { max-width: 620px; width: 100%; text-align: center; font-size: 12px; color: #6b7280; line-height: 1.6; margin: 18px auto 4px; }
+
 @media (max-width: 560px) { .wp-grid { grid-template-columns: 1fr; } .wp-card { padding: 24px 20px; } }

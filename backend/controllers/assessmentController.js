@@ -314,7 +314,7 @@ exports.listCandidates = async (req, res) => {
 
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
-        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size resume.url status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations refreshCount terminationReason geo submissionReason startedAt completedAt token tokenExpiresAt createdAt")
+        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.ext resume.mime resume.size resume.url resume.uploadedAt status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations refreshCount terminationReason geo submissionReason startedAt completedAt token tokenExpiresAt createdAt")
         .populate("assessmentId", "name driveType cutoff")  // drive context for the global view
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
@@ -483,17 +483,43 @@ exports.updateCandidateStatus = async (req, res) => {
 };
 
 // Download a candidate's uploaded resume (admin).
+// Resolve the correct MIME type from extension when the stored mime is generic.
+function resumeMime(ext, stored) {
+  const e = (ext || "").toLowerCase();
+  if (e === "pdf") return "application/pdf";
+  if (e === "doc") return "application/msword";
+  if (e === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  return stored && stored !== "application/octet-stream" ? stored : "application/octet-stream";
+}
+
 exports.getCandidateResume = async (req, res) => {
   try {
-    const c = await Candidate.findById(req.params.id).select("resume name").lean();
+    const c = await Candidate.findById(req.params.id).select("resume name usn").lean();
     if (!c || !c.resume || (!c.resume.url && !c.resume.data)) return res.status(404).json({ success: false, message: "No resume on file." });
-    // Cloudinary-hosted → redirect to the secure URL.
-    if (c.resume.url) return res.redirect(c.resume.url);
-    // Base64 fallback → stream the file.
-    const buf = Buffer.from(c.resume.data, "base64");
-    const safe = String(c.name || "candidate").replace(/[^a-z0-9]+/gi, "_");
-    res.setHeader("Content-Type", c.resume.mime || "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="${safe}_${c.resume.filename || "resume"}"`);
+
+    // Build a clean, predictable filename: CandidateName_USN_Resume.ext
+    const r = c.resume;
+    const ext = (r.ext || (r.filename || "").split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
+    const namePart = String(c.name || "Candidate").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
+    const usnPart  = c.usn ? `_${String(c.usn).replace(/[^a-z0-9]+/gi, "_")}` : "";
+    const downloadName = `${namePart}${usnPart}_Resume.${ext}`;
+    const inline = req.query.download ? false : true; // preview inline by default; ?download=1 forces save
+    const mime = resumeMime(ext, r.mime);
+
+    // Fetch the bytes (Cloudinary URL streamed server-side so we control the headers),
+    // or use the base64 fallback. This guarantees the right content-type + filename
+    // regardless of how the file was stored — fixes "wrong extension / unreadable".
+    let buf;
+    if (r.data) {
+      buf = Buffer.from(r.data, "base64");
+    } else {
+      const resp = await fetch(r.url);
+      if (!resp.ok) return res.status(502).json({ success: false, message: "Resume is temporarily unavailable." });
+      buf = Buffer.from(await resp.arrayBuffer());
+    }
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${downloadName}"`);
+    res.setHeader("Cache-Control", "private, max-age=300");
     res.send(buf);
   } catch (err) {
     console.error("getCandidateResume:", err);
