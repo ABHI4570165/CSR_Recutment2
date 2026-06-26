@@ -164,7 +164,7 @@ export default function WalkInPortal() {
         <img src="/logo.png" alt="M H Foundation" className="wp-logo" onError={(e) => { e.currentTarget.style.display = "none"; }} />
         <div>
           <div className="wp-brand">M H FOUNDATION</div>
-          <div className="wp-partner">Walk-in Assessment Portal · Inference Labs Pvt. Ltd.</div>
+          <div className="wp-partner">Assessment Portal</div>
         </div>
       </header>
 
@@ -252,7 +252,7 @@ export default function WalkInPortal() {
         </div>
 
         <footer className="wp-footer">
-          © {new Date().getFullYear()} M H FOUNDATION · In association with Inference Labs Private Limited<br />
+          © {new Date().getFullYear()} M H FOUNDATION<br />
           For assistance, please contact your assessment coordinator.
         </footer>
       </div>
