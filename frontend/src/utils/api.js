@@ -138,7 +138,7 @@ export const downloadResume       = (id)    => adminApi.get(`/assessments/candid
 const candApi = axios.create({ baseURL: BASE, timeout: 30000, headers: { "Content-Type": "application/json" } });
 candApi.interceptors.response.use((r) => r, handleErr);
 export const getCandidate    = (token)    => candApi.get(`/candidate/${token}`);
-export const startCandidate  = (token)    => candApi.post(`/candidate/${token}/start`);
+export const startCandidate  = (token, d) => candApi.post(`/candidate/${token}/start`, d || {});
 export const saveCandidate   = (token, d) => candApi.post(`/candidate/${token}/save`, d);
 export const submitCandidate = (token, d) => candApi.post(`/candidate/${token}/submit`, d);
 

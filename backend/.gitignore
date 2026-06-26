@@ -2,3 +2,7 @@ node_modules/
 .env
 logs/
 *.log
+
+# Merged React build (generated; goes into the deploy zip, not into git)
+client/
+dist/

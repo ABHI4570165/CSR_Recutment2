@@ -49,6 +49,15 @@ const violationsSchema = new mongoose.Schema({
   tabSwitches:     { type: Number, default: 0 },
   focusLoss:       { type: Number, default: 0 },
   multipleFaces:   { type: Number, default: 0 },  // extra person(s) detected in camera
+  // ── V3.1 forensic counters (all default 0; only incremented when the toggle is on) ──
+  refresh:         { type: Number, default: 0 },
+  devtools:        { type: Number, default: 0 },
+  clipboard:       { type: Number, default: 0 },
+  idle:            { type: Number, default: 0 },
+  windowResize:    { type: Number, default: 0 },
+  location:        { type: Number, default: 0 },
+  cameraDisconnect:{ type: Number, default: 0 },
+  faceHidden:      { type: Number, default: 0 },
   total:           { type: Number, default: 0 },
 }, { _id: false });
 
@@ -129,6 +138,18 @@ const candidateSchema = new mongoose.Schema({
 
   // Anti-malpractice
   violations: { type: violationsSchema, default: () => ({}) },
+
+  // V3.1 forensics
+  refreshCount:      { type: Number, default: 0 },        // browser refreshes during the attempt
+  terminationReason: { type: String, default: undefined },// human-readable cause of auto-termination
+  geo: {                                                   // captured once before start (Batch B)
+    lat:      { type: Number, default: null },
+    lng:      { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    distance: { type: Number, default: null },            // metres from the drive centre
+    inside:   { type: Boolean, default: null },           // within the allowed radius?
+    capturedAt: { type: Date },
+  },
 }, { timestamps: true });
 
 // Compound indexes for the admin drive dashboard (college + assessment + status filters)

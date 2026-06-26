@@ -61,15 +61,48 @@ const assessmentSchema = new mongoose.Schema({
   // Capacity planning hint (Phase 20)
   expectedCandidates: { type: Number, default: null },
 
-  // Per-drive security toggles (Phase 8) — all on by default
+  // Per-drive security toggles (Phase 8 + V3.1) — all on by default.
   security: {
-    desktopOnly:          { type: Boolean, default: true },
-    fullscreenEnforcement:{ type: Boolean, default: true },
-    cameraMonitoring:     { type: Boolean, default: true },
-    faceVerification:     { type: Boolean, default: true },
-    multipleFaceDetection:{ type: Boolean, default: true },
-    tabSwitchDetection:   { type: Boolean, default: true },
-    violationTracking:    { type: Boolean, default: true },
+    // ── Original 7 ──
+    desktopOnly:           { type: Boolean, default: true },
+    fullscreenEnforcement: { type: Boolean, default: true },
+    cameraMonitoring:      { type: Boolean, default: true },
+    faceVerification:      { type: Boolean, default: true },
+    multipleFaceDetection: { type: Boolean, default: true },
+    tabSwitchDetection:    { type: Boolean, default: true },
+    violationTracking:     { type: Boolean, default: true },
+    // ── Batch A: client-side enforcement (V3.1) ──
+    refreshProtection:        { type: Boolean, default: true },
+    rightClickProtection:     { type: Boolean, default: true },
+    keyboardBlocking:         { type: Boolean, default: true },
+    devToolsDetection:        { type: Boolean, default: true },
+    clipboardMonitoring:      { type: Boolean, default: true },
+    idleDetection:            { type: Boolean, default: true },
+    windowResizeDetection:    { type: Boolean, default: true },
+    screenResolutionCheck:    { type: Boolean, default: true },
+    browserCompatibility:     { type: Boolean, default: true },
+    incognitoDetection:       { type: Boolean, default: true },
+    cameraDisconnectDetection:{ type: Boolean, default: true },
+    faceVisibilityDetection:  { type: Boolean, default: true },
+    // ── Batch B: geolocation ──
+    locationRestriction:      { type: Boolean, default: false }, // off unless admin sets a location
+  },
+
+  // Numeric / structured security configuration (not toggles).
+  securityConfig: {
+    maxViolations:   { type: Number, default: 3 },   // warnings before auto-terminate
+    idleSeconds:     { type: Number, default: 120 },  // inactivity before idle termination
+    clipboardLimit:  { type: Number, default: 3 },    // copy/paste attempts before terminate
+    minScreenWidth:  { type: Number, default: 1024 },
+    minScreenHeight: { type: Number, default: 600 },
+    cameraGraceSeconds: { type: Number, default: 10 },// camera disconnect / face-not-visible grace
+    // Geolocation center + allowed radius (Batch B). Admin sets this on the drive.
+    location: {
+      lat:          { type: Number, default: null },
+      lng:          { type: Number, default: null },
+      radiusMeters: { type: Number, default: 200 },
+      label:        { type: String, default: "" },
+    },
   },
 }, { timestamps: true });
 

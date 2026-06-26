@@ -121,6 +121,48 @@ function isMobileDevice() {
   return mobileUA || iPadOS || (touch && smallest < 820);
 }
 
+/* ── V3.1 security helpers (config-driven; only used when the matching toggle is on) ── */
+const VKEYS = ["fullscreenExits","tabSwitches","focusLoss","multipleFaces","refresh","devtools",
+  "clipboard","idle","windowResize","location","cameraDisconnect","faceHidden"];
+const ALLOWED_BROWSERS = ["chrome", "edge", "firefox"];
+function detectBrowser() {
+  const ua = navigator.userAgent || "";
+  if (/Edg\//.test(ua)) return "edge";
+  if (/OPR\//.test(ua) || /Opera/.test(ua)) return "opera";
+  if (/Firefox\//.test(ua)) return "firefox";
+  if (/Chrome\//.test(ua)) return "chrome";
+  if (/Safari\//.test(ua)) return "safari";
+  return "other";
+}
+function screenMeets(minW, minH) {
+  return (window.screen?.width || 0) >= (minW || 0) && (window.screen?.height || 0) >= (minH || 0);
+}
+async function detectIncognito() {
+  try {
+    if (navigator.storage?.estimate) {
+      const { quota } = await navigator.storage.estimate();
+      if (quota && quota < 120 * 1024 * 1024) return true; // private windows get a tiny quota
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, r = (x) => (x * Math.PI) / 180;
+  const dLat = r(lat2 - lat1), dLng = r(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
+}
+function getGeoOnce() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
+
 /* Palette state for a question id */
 const PSTATE = {
   NOT_VISITED: "not-visited", NOT_ANSWERED: "not-answered", ANSWERED: "answered",
@@ -188,10 +230,20 @@ export default function AssessmentPage() {
   const noFaceStreakRef = useRef(0);
   const multiCooldownRef = useRef(0);
   const secRef = useRef({});   // live per-drive security toggles
+  const cfgRef = useRef({});   // live per-drive security config (numbers + location)
+  const refreshCountRef = useRef(0);
+  const lastActivityRef = useRef(Date.now());
+  const camGoneSinceRef = useRef(0);
+  const faceGoneSinceRef = useRef(0);
+  const [incognito, setIncognito] = useState(null); // null=unknown, true/false
+  const [geoBlock, setGeoBlock] = useState(null);    // {distance,radius,msg} location block
 
   const [nowTick, setNowTick] = useState(Date.now());
 
-  useEffect(() => { if (info?.security) secRef.current = info.security; }, [info]);
+  useEffect(() => {
+    if (info?.security) secRef.current = info.security;
+    if (info?.securityConfig) cfgRef.current = info.securityConfig;
+  }, [info]);
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { reviewRef.current = review; }, [review]);
   useEffect(() => { visitedRef.current = visited; }, [visited]);
@@ -220,8 +272,21 @@ export default function AssessmentPage() {
     (async () => {
       try {
         const res = await getCandidate(token);
-        setInfo(res.data.data);
+        const data = res.data.data;
+        setInfo(data);
         const state = res.data.state;
+        // Browser Refresh Protection: an in-progress attempt loading again = a refresh/re-entry.
+        // Allow one accidental refresh; the second terminates. (Only when the toggle is on.)
+        if (state === "in-progress" && data?.security?.refreshProtection !== false) {
+          const key = `asmt_refresh_${token}`;
+          const n = (parseInt(localStorage.getItem(key) || "0", 10) || 0) + 1;
+          try { localStorage.setItem(key, String(n)); } catch { /* ignore */ }
+          refreshCountRef.current = n;
+          if (n >= 2) {
+            try { await submitCandidate(token, { answers: {}, reason: "auto-malpractice", terminationReason: "Browser Refresh Limit Exceeded", refreshCount: n }); } catch { /* idempotent */ }
+            setPhase("terminated"); return;
+          }
+        }
         if (state === "expired") setPhase("expired");
         else if (state === "completed") setPhase("completed");
         else if (state === "disqualified") setPhase("terminated");
@@ -408,7 +473,17 @@ export default function AssessmentPage() {
       return;
     }
     try {
-      const res = await startCandidate(token);
+      // Batch B: capture location before starting when the drive enforces a radius.
+      let geo;
+      if ((secRef.current || {}).locationRestriction === true) {
+        geo = await getGeoOnce();
+        if (!geo) {
+          setGeoBlock({ msg: "Location access is required to start this assessment. Please allow location access in your browser and retry." });
+          setPhase("locationblocked");
+          return;
+        }
+      }
+      const res = await startCandidate(token, geo ? { geo } : undefined);
       const d = res.data.data;
       // Merge any local backup (answers made while offline before a refresh/crash).
       let bAns = {}, bRev = [], bVis = [];
@@ -443,6 +518,8 @@ export default function AssessmentPage() {
       if (err.state === "disqualified") { setPhase("terminated"); return; }
       if (err.state === "expired")      { setPhase("expired"); return; }
       if (err.state === "not-started")  { setPhase("notstarted"); return; }
+      if (err.state === "location-blocked") { setGeoBlock({ distance: err.distance, radius: err.radius, msg: "You are outside the permitted assessment location." }); setPhase("locationblocked"); return; }
+      if (err.state === "location-required") { setGeoBlock({ msg: err.message || "Location access is required to start this assessment." }); setPhase("locationblocked"); return; }
       setErrMsg(err.message || "Failed to start assessment."); setPhase("error");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -497,16 +574,24 @@ export default function AssessmentPage() {
     return () => { window.removeEventListener("online", goOnline); window.removeEventListener("offline", goOffline); };
   }, [phase, persist, writeBackup]);
 
-  /* ── Violation recording (shared by fullscreen/tab/blur + face monitor) ──── */
-  const recordViolation = useCallback((kind, reason) => {
+  /* ── Immediate termination (for hard rules: refresh limit, camera/face/location) ── */
+  const terminateNow = useCallback((label) => {
+    if (submitted.current) return;
+    doSubmit({ reason: "auto-malpractice", terminationReason: label });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── Violation recording (shared by fullscreen/tab/blur + face/security monitors) ── */
+  const recordViolation = useCallback((kind, reason, label) => {
     if (submitted.current) return;
     violRef.current = { ...violRef.current, [kind]: (violRef.current[kind] || 0) + 1 };
     const v = violRef.current;
-    const total = (v.fullscreenExits || 0) + (v.tabSwitches || 0) + (v.focusLoss || 0) + (v.multipleFaces || 0);
+    const total = VKEYS.reduce((s, k) => s + (v[k] || 0), 0);
     setViolCount(total);
     setViolReason(reason || "");
     persist();
-    if (total >= MAX_VIOLATIONS) { doSubmit({ reason: "auto-malpractice" }); return; }
+    const max = cfgRef.current?.maxViolations || MAX_VIOLATIONS;
+    if (total >= max) { doSubmit({ reason: "auto-malpractice", terminationReason: label || "Violation limit exceeded" }); return; }
     setShowViol(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persist]);
@@ -532,7 +617,11 @@ export default function AssessmentPage() {
   /* ── Continuous face monitoring during the assessment ─────────────────────── */
   useEffect(() => {
     if (phase !== "quiz" || !detectorRef.current) return;  // no detector → nothing to monitor
-    if ((secRef.current || {}).multipleFaceDetection === false) return; // disabled for this drive
+    const sec = secRef.current || {};
+    const multiOn   = sec.multipleFaceDetection !== false;
+    const faceVisOn = sec.faceVisibilityDetection !== false;
+    if (!multiOn && !faceVisOn) return; // both disabled for this drive
+    const grace = cfgRef.current?.cameraGraceSeconds || 10;
     multiStreakRef.current = 0; noFaceStreakRef.current = 0; multiCooldownRef.current = 0;
     monitorTimerRef.current = setInterval(() => {
       if (submitted.current) return;
@@ -542,20 +631,162 @@ export default function AssessmentPage() {
         noFaceStreakRef.current = 0; setFaceWarn("");
         multiStreakRef.current += 1;
         // Require 2 consecutive detections (~2s) + a cooldown → one violation per incident.
-        if (multiStreakRef.current >= 2 && Date.now() > multiCooldownRef.current) {
+        if (multiOn && multiStreakRef.current >= 2 && Date.now() > multiCooldownRef.current) {
           multiCooldownRef.current = Date.now() + 6000;
-          recordViolation("multipleFaces", "multipleFaces");
+          recordViolation("multipleFaces", "multipleFaces", "Multiple faces detected");
         }
       } else if (count === 0) {
         multiStreakRef.current = 0;
         noFaceStreakRef.current += 1;
-        if (noFaceStreakRef.current >= 3) setFaceWarn("Face not detected — please stay visible to the camera.");
+        // Face-visibility: warn, then terminate after the configured grace period (~1 tick/sec).
+        if (faceVisOn) {
+          const left = grace - noFaceStreakRef.current;
+          if (left <= 0) { setFaceWarn(""); terminateNow("Face Not Visible"); return; }
+          if (noFaceStreakRef.current >= 3) setFaceWarn(`Face not detected — please stay visible. Terminating in ${left}s.`);
+        } else if (noFaceStreakRef.current >= 3) {
+          setFaceWarn("Face not detected — please stay visible to the camera.");
+        }
       } else {
         multiStreakRef.current = 0; noFaceStreakRef.current = 0; setFaceWarn("");
       }
     }, 1000);
     return () => { if (monitorTimerRef.current) { clearInterval(monitorTimerRef.current); monitorTimerRef.current = null; } };
-  }, [phase, recordViolation]);
+  }, [phase, recordViolation, terminateNow]);
+
+  /* ── Camera-disconnect detection (config: cameraDisconnectDetection + grace) ── */
+  useEffect(() => {
+    if (phase !== "quiz") return;
+    const sec = secRef.current || {};
+    if (sec.cameraMonitoring === false || sec.cameraDisconnectDetection === false) return;
+    const grace = (cfgRef.current?.cameraGraceSeconds || 10) * 1000;
+    camGoneSinceRef.current = 0;
+    const iv = setInterval(() => {
+      if (submitted.current) return;
+      const track = streamRef.current?.getVideoTracks?.()[0];
+      const live = track && track.readyState === "live" && track.enabled !== false;
+      if (!live) {
+        if (!camGoneSinceRef.current) { camGoneSinceRef.current = Date.now(); setFaceWarn("Camera disconnected — reconnect within the grace period."); }
+        else if (Date.now() - camGoneSinceRef.current >= grace) { recordViolation("cameraDisconnect", "tab", "Camera Disconnected"); terminateNow("Camera Disconnected"); }
+      } else if (camGoneSinceRef.current) {
+        camGoneSinceRef.current = 0; setFaceWarn("");
+      }
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [phase, recordViolation, terminateNow]);
+
+  /* ── Batch A: DOM-level protections (right-click, keyboard, clipboard, resize, idle, devtools) ── */
+  useEffect(() => {
+    if (phase !== "quiz") return;
+    const sec = secRef.current || {};
+    const cfg = cfgRef.current || {};
+    const cleanups = [];
+    const on = (t, ev, fn, opts) => { t.addEventListener(ev, fn, opts); cleanups.push(() => t.removeEventListener(ev, fn, opts)); };
+
+    // Right-click / copy / paste / cut / drag / print blocking
+    if (sec.rightClickProtection !== false) {
+      const block = (e) => { e.preventDefault(); return false; };
+      ["contextmenu", "dragstart"].forEach((ev) => on(document, ev, block));
+    }
+    // Clipboard monitoring (count attempts → terminate past the limit)
+    if (sec.clipboardMonitoring !== false) {
+      const limit = cfg.clipboardLimit || 3;
+      const onClip = (e) => {
+        if (sec.rightClickProtection !== false) e.preventDefault();
+        const v = (violRef.current.clipboard || 0) + 1;
+        if (v >= limit) { recordViolation("clipboard", "tab", "Clipboard limit exceeded"); }
+        else { violRef.current = { ...violRef.current, clipboard: v }; setFaceWarn(`Copy/paste is disabled (${v}/${limit}).`); setTimeout(() => setFaceWarn(""), 2500); }
+      };
+      ["copy", "paste", "cut"].forEach((ev) => on(document, ev, onClip));
+    } else if (sec.rightClickProtection !== false) {
+      const block = (e) => e.preventDefault();
+      ["copy", "paste", "cut"].forEach((ev) => on(document, ev, block));
+    }
+    // Keyboard shortcut blocking
+    if (sec.keyboardBlocking !== false) {
+      const onKey = (e) => {
+        const k = (e.key || "").toLowerCase();
+        const combo = (e.ctrlKey || e.metaKey);
+        const blocked =
+          k === "f12" ||
+          (combo && e.shiftKey && ["i", "j", "c"].includes(k)) ||
+          (combo && ["c", "v", "x", "a", "s", "p", "u"].includes(k));
+        if (blocked) { e.preventDefault(); e.stopPropagation(); return false; }
+      };
+      on(document, "keydown", onKey, true);
+    }
+    // Window-resize detection (debounced; compares to the entry size)
+    if (sec.windowResizeDetection !== false) {
+      let base = { w: window.innerWidth, h: window.innerHeight };
+      let t = null, cooldown = 0;
+      const onResize = () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          const dw = Math.abs(window.innerWidth - base.w), dh = Math.abs(window.innerHeight - base.h);
+          if ((dw > 120 || dh > 120) && Date.now() > cooldown) {
+            cooldown = Date.now() + 4000; base = { w: window.innerWidth, h: window.innerHeight };
+            recordViolation("windowResize", "tab", "Abnormal window resize");
+          }
+        }, 400);
+      };
+      on(window, "resize", onResize);
+    }
+    // Idle detection (warn near the end, then terminate)
+    let idleIv = null;
+    if (sec.idleDetection !== false) {
+      const limit = (cfg.idleSeconds || 120) * 1000;
+      lastActivityRef.current = Date.now();
+      const bump = () => { lastActivityRef.current = Date.now(); };
+      ["mousemove", "keydown", "click", "scroll", "touchstart"].forEach((ev) => on(window, ev, bump, { passive: true }));
+      idleIv = setInterval(() => {
+        if (submitted.current) return;
+        const idle = Date.now() - lastActivityRef.current;
+        if (idle >= limit) { recordViolation("idle", "tab", "Idle timeout"); terminateNow("Idle Timeout"); }
+        else if (idle >= limit * 0.75) setFaceWarn("You appear inactive — interact to avoid termination.");
+      }, 3000);
+    }
+    // DevTools detection (window/viewport delta heuristic)
+    let devIv = null;
+    if (sec.devToolsDetection !== false) {
+      let cooldown = 0;
+      devIv = setInterval(() => {
+        if (submitted.current) return;
+        const wDiff = window.outerWidth - window.innerWidth;
+        const hDiff = window.outerHeight - window.innerHeight;
+        const open = wDiff > 200 || hDiff > 200;
+        if (open && Date.now() > cooldown) { cooldown = Date.now() + 5000; recordViolation("devtools", "tab", "Developer tools opened"); }
+      }, 1500);
+    }
+
+    return () => { cleanups.forEach((fn) => fn()); if (idleIv) clearInterval(idleIv); if (devIv) clearInterval(devIv); };
+  }, [phase, recordViolation, terminateNow]);
+
+  /* ── Batch B: location lock — re-check every 60s; 2nd breach terminates ──────── */
+  useEffect(() => {
+    if (phase !== "quiz") return;
+    const sec = secRef.current || {};
+    const loc = cfgRef.current?.location || {};
+    if (sec.locationRestriction !== true || loc.lat == null || loc.lng == null) return;
+    const radius = loc.radiusMeters || 200;
+    const iv = setInterval(async () => {
+      if (submitted.current) return;
+      const g = await getGeoOnce();
+      if (!g) return; // can't read now — don't penalise transient failures
+      const dist = haversineM(loc.lat, loc.lng, g.lat, g.lng);
+      if (dist > radius) {
+        const v = (violRef.current.location || 0) + 1;
+        if (v >= 2) { recordViolation("location", "tab", "Location Violation"); terminateNow("Location Violation"); }
+        else { violRef.current = { ...violRef.current, location: v }; setFaceWarn(`You appear to have left the permitted location (${dist}m). One more breach will terminate the assessment.`); }
+      }
+    }, 60000);
+    return () => clearInterval(iv);
+  }, [phase, recordViolation, terminateNow]);
+
+  /* ── Incognito detection (async; result used by the render gate) ───────────── */
+  useEffect(() => {
+    let alive = true;
+    detectIncognito().then((r) => { if (alive) setIncognito(r); });
+    return () => { alive = false; };
+  }, []);
 
   // If fullscreen is dropped DURING the camera/face gate (e.g. Esc while the model
   // loads), abort verification and return to the Rules page — never enter the quiz.
@@ -581,16 +812,17 @@ export default function AssessmentPage() {
   const dismissViolation = useCallback(() => { setShowViol(false); requestFullscreen().catch(() => {}); }, []);
 
   /* ── Submit ───────────────────────────────────────────────────────────────── */
-  const doSubmit = useCallback(async ({ timedOut = false, reason } = {}) => {
+  const doSubmit = useCallback(async ({ timedOut = false, reason, terminationReason } = {}) => {
     if (submitted.current) return;
     submitted.current = true;
     clearInterval(timerRef.current);
     const disqualified = reason === "auto-malpractice";
     setPhase("submitting");
     try {
-      await submitCandidate(token, { answers: answersRef.current, timedOut, reason, violations: violRef.current });
+      await submitCandidate(token, { answers: answersRef.current, timedOut, reason, violations: violRef.current,
+        refreshCount: refreshCountRef.current, terminationReason });
     } catch { /* idempotent on server */ }
-    try { localStorage.removeItem(`asmt_backup_${token}`); } catch { /* ignore */ }
+    try { localStorage.removeItem(`asmt_backup_${token}`); localStorage.removeItem(`asmt_refresh_${token}`); } catch { /* ignore */ }
     stopCamera();
     if (isFullscreen()) exitFullscreen();
     setPhase(disqualified ? "terminated" : "result");
@@ -628,10 +860,35 @@ export default function AssessmentPage() {
   }, [questions, answers, review]);
 
   /* ── Renders ──────────────────────────────────────────────────────────────── */
+  // Pre-start hard gates — each enforced ONLY when its drive toggle is on.
+  const sx = info?.security || {};
+  const cx = info?.securityConfig || {};
   // Mobile / tablet blocked — unless this drive disables the desktop-only rule.
-  if (isMobile && (info?.security?.desktopOnly !== false)) return (
+  if (isMobile && (sx.desktopOnly !== false)) return (
     <CenterCard icon="💻" title="Desktop or Laptop Required"
       message="This assessment must be taken on a laptop or desktop computer. Please switch to a desktop browser and reopen your assessment link." />
+  );
+  // Screen resolution too small
+  if (info && sx.screenResolutionCheck !== false && !screenMeets(cx.minScreenWidth || 1024, cx.minScreenHeight || 600)) return (
+    <CenterCard icon="🖥️" title="Unsupported Screen Resolution"
+      message={`This assessment requires a minimum screen resolution of ${cx.minScreenWidth || 1024}×${cx.minScreenHeight || 600}. Please use a larger display.`} />
+  );
+  // Unsupported browser
+  if (info && sx.browserCompatibility !== false && !ALLOWED_BROWSERS.includes(detectBrowser())) return (
+    <CenterCard icon="🌐" title="Unsupported Browser"
+      message="Please use the latest Google Chrome, Microsoft Edge, or Mozilla Firefox to take this assessment." />
+  );
+  // Incognito / private window
+  if (info && sx.incognitoDetection !== false && incognito === true) return (
+    <CenterCard icon="🕵️" title="Private Browsing Not Allowed"
+      message="This assessment cannot be taken in an Incognito / Private window. Please reopen the link in a normal browser window." />
+  );
+  // Location blocked / required (Batch B)
+  if (phase === "locationblocked") return (
+    <CenterCard icon="📍" title="Outside Permitted Location"
+      message={geoBlock?.distance != null
+        ? `You are outside the permitted assessment location (${geoBlock.distance} m away; allowed radius ${geoBlock.radius} m). ${geoBlock.msg || ""}`
+        : (geoBlock?.msg || "You are outside the permitted assessment location.")} />
   );
 
   if (phase === "loading") return <CenterCard icon={<div className="qp-spinner-lg" />} title="Loading…" />;

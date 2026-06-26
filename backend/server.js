@@ -5,6 +5,8 @@ const helmet      = require("helmet");
 const compression = require("compression");
 const morgan      = require("morgan");
 const mongoose    = require("mongoose");
+const path        = require("path");
+const fs          = require("fs");
 const { createClient } = require("./utils/redis");
 
 const app = express();
@@ -63,7 +65,11 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 // ── STEP 3: Other middleware ──────────────────────────────────────────────────
-app.use(helmet({ crossOriginEmbedderPolicy: false }));
+// CSP disabled: Express now serves the React SPA on the SAME origin, and the
+// app loads Google Fonts + vendored MediaPipe assets that helmet's default CSP
+// would block. crossOriginEmbedderPolicy off so the camera/COEP isolation
+// doesn't break the proctoring webcam.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(compression());
 if (process.env.NODE_ENV !== "production") app.use(morgan("dev"));
 
@@ -122,6 +128,23 @@ app.get("/api/debug", (_req, res) => {
   });
 });
 
+// ── STEP 7: Serve the React build (same-domain deploy) ──────────────────────────
+// The frontend is built and copied to backend/client/dist. We serve those static
+// files and fall back to index.html for any non-/api route (client-side routing).
+// Guarded by existsSync so the server still runs API-only if the build is absent.
+const CLIENT_DIST = path.join(__dirname, "client", "dist");
+if (fs.existsSync(path.join(CLIENT_DIST, "index.html"))) {
+  console.log("🖥️   Serving React build from", CLIENT_DIST);
+  app.use(express.static(CLIENT_DIST));
+  // SPA fallback — anything that isn't an /api route returns index.html.
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(CLIENT_DIST, "index.html"));
+  });
+} else {
+  console.warn("⚠️   client/dist not found — running API-only (no frontend served).");
+}
+
 // ── Global error handler ──────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
@@ -133,7 +156,7 @@ app.use((err, _req, res, _next) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () =>
   console.log(
     `🚀  Server on port ${PORT} [${process.env.NODE_ENV || "development"}] PID:${process.pid}`

@@ -77,6 +77,7 @@ exports.createAssessment = async (req, res) => {
       ...(b.maxCandidates != null && b.maxCandidates !== "" ? { maxCandidates: parseInt(b.maxCandidates) } : {}),
       ...(b.expectedCandidates != null && b.expectedCandidates !== "" ? { expectedCandidates: parseInt(b.expectedCandidates) } : {}),
       ...(b.security && typeof b.security === "object" ? { security: b.security } : {}),
+      ...(b.securityConfig && typeof b.securityConfig === "object" ? { securityConfig: b.securityConfig } : {}),
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
@@ -123,7 +124,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "cutoff", "maxCandidates", "expectedCandidates", "security"];
+      "status", "college", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
@@ -313,7 +314,7 @@ exports.listCandidates = async (req, res) => {
 
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
-        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size resume.url status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations submissionReason startedAt completedAt token tokenExpiresAt createdAt")
+        .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.size resume.url status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations refreshCount terminationReason geo submissionReason startedAt completedAt token tokenExpiresAt createdAt")
         .populate("assessmentId", "name driveType cutoff")  // drive context for the global view
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
@@ -519,8 +520,29 @@ exports.deleteCandidate = async (req, res) => {
 
 function now() { return Date.now(); }
 
+// All per-attempt violation counters (monotonic — we keep the max seen).
+const VIOLATION_KEYS = ["fullscreenExits", "tabSwitches", "focusLoss", "multipleFaces",
+  "refresh", "devtools", "clipboard", "idle", "windowResize", "location", "cameraDisconnect", "faceHidden"];
+function mergeViolations(existing, incoming) {
+  const out = {};
+  let total = 0;
+  VIOLATION_KEYS.forEach(k => { const v = Math.max(existing?.[k] || 0, incoming?.[k] || 0); out[k] = v; total += v; });
+  out.total = total;
+  return out;
+}
+
+// Great-circle distance in metres between two lat/lng points (Haversine).
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 function publicCandidateView(c, assessment) {
   const s = assessment.security || {};
+  const cfg = assessment.securityConfig || {};
+  const loc = cfg.location || {};
   return {
     name: c.name,
     college: c.college,
@@ -537,6 +559,30 @@ function publicCandidateView(c, assessment) {
       multipleFaceDetection: s.multipleFaceDetection !== false,
       tabSwitchDetection:    s.tabSwitchDetection !== false,
       violationTracking:     s.violationTracking !== false,
+      // Batch A (default ON)
+      refreshProtection:         s.refreshProtection !== false,
+      rightClickProtection:      s.rightClickProtection !== false,
+      keyboardBlocking:          s.keyboardBlocking !== false,
+      devToolsDetection:         s.devToolsDetection !== false,
+      clipboardMonitoring:       s.clipboardMonitoring !== false,
+      idleDetection:             s.idleDetection !== false,
+      windowResizeDetection:     s.windowResizeDetection !== false,
+      screenResolutionCheck:     s.screenResolutionCheck !== false,
+      browserCompatibility:      s.browserCompatibility !== false,
+      incognitoDetection:        s.incognitoDetection !== false,
+      cameraDisconnectDetection: s.cameraDisconnectDetection !== false,
+      faceVisibilityDetection:   s.faceVisibilityDetection !== false,
+      // Batch B (default OFF unless a location is configured)
+      locationRestriction:       s.locationRestriction === true && loc.lat != null && loc.lng != null,
+    },
+    securityConfig: {
+      maxViolations:   cfg.maxViolations   || 3,
+      idleSeconds:     cfg.idleSeconds     || 120,
+      clipboardLimit:  cfg.clipboardLimit  || 3,
+      minScreenWidth:  cfg.minScreenWidth  || 1024,
+      minScreenHeight: cfg.minScreenHeight || 600,
+      cameraGraceSeconds: cfg.cameraGraceSeconds || 10,
+      location: { lat: loc.lat ?? null, lng: loc.lng ?? null, radiusMeters: loc.radiusMeters || 200, label: loc.label || "" },
     },
   };
 }
@@ -693,6 +739,30 @@ exports.startCandidate = async (req, res) => {
       return res.status(410).json({ success: false, state: "expired", message: "This assessment window has expired." });
     }
 
+    // ── Batch B: geolocation gate (server-authoritative distance) ──────────────
+    // Enforced only when the drive enables locationRestriction AND has a centre set.
+    const sec = assessment.security || {};
+    const locCfg = (assessment.securityConfig || {}).location || {};
+    if (sec.locationRestriction === true && locCfg.lat != null && locCfg.lng != null) {
+      const g = req.body?.geo || {};
+      if (typeof g.lat !== "number" || typeof g.lng !== "number") {
+        return res.status(428).json({ success: false, state: "location-required",
+          message: "Location access is required to start this assessment. Please allow location and retry." });
+      }
+      const distance = haversineMeters(locCfg.lat, locCfg.lng, g.lat, g.lng);
+      const radius = locCfg.radiusMeters || 200;
+      const inside = distance <= radius;
+      c.geo = { lat: g.lat, lng: g.lng, accuracy: g.accuracy ?? null, distance, inside, capturedAt: new Date() };
+      if (!inside) {
+        await c.save();
+        return res.status(403).json({ success: false, state: "location-blocked", distance, radius,
+          message: "You are outside the permitted assessment location." });
+      }
+    } else if (req.body?.geo && typeof req.body.geo.lat === "number") {
+      // Location not enforced, but still record it if the client volunteered it.
+      c.geo = { lat: req.body.geo.lat, lng: req.body.geo.lng, accuracy: req.body.geo.accuracy ?? null, distance: null, inside: null, capturedAt: new Date() };
+    }
+
     // Fresh start
     const { questionOrder, optionOrder, clientQuestions } = await buildPaper(assessment);
     if (!clientQuestions.length) {
@@ -727,19 +797,16 @@ exports.saveProgress = async (req, res) => {
   try {
     const c = req.candidate;
     if (c.status !== "in-progress") return res.json({ success: true }); // silent no-op
-    const { answers, currentQuestion, violations, review, visited } = req.body || {};
+    const { answers, currentQuestion, violations, review, visited, refreshCount } = req.body || {};
 
     const set = { "progress.lastSavedAt": new Date() };
     if (answers && typeof answers === "object") set["progress.answers"] = answers;
     if (Array.isArray(review))  set["progress.review"]  = review.map(String);
     if (Array.isArray(visited)) set["progress.visited"] = visited.map(String);
     if (Number.isInteger(currentQuestion)) set["progress.currentQuestion"] = currentQuestion;
+    if (Number.isInteger(refreshCount)) set["refreshCount"] = Math.max(c.refreshCount || 0, refreshCount);
     if (violations && typeof violations === "object") {
-      const fs = Math.max(c.violations?.fullscreenExits || 0, violations.fullscreenExits || 0);
-      const ts = Math.max(c.violations?.tabSwitches || 0, violations.tabSwitches || 0);
-      const fl = Math.max(c.violations?.focusLoss || 0, violations.focusLoss || 0);
-      const mf = Math.max(c.violations?.multipleFaces || 0, violations.multipleFaces || 0);
-      set["violations"] = { fullscreenExits: fs, tabSwitches: ts, focusLoss: fl, multipleFaces: mf, total: fs + ts + fl + mf };
+      set["violations"] = mergeViolations(c.violations, violations);
     }
     await Candidate.updateOne({ _id: c._id, status: "in-progress" }, { $set: set });
     res.json({ success: true });
@@ -765,7 +832,8 @@ exports.submitCandidate = async (req, res) => {
       return res.status(400).json({ success: false, message: "No active attempt to submit." });
     }
 
-    const { answers = {}, timedOut = false, reason, violations } = req.body || {};
+    const { answers = {}, timedOut = false, reason, violations, terminationReason, refreshCount } = req.body || {};
+    if (Number.isInteger(refreshCount)) c.refreshCount = Math.max(c.refreshCount || 0, refreshCount);
 
     const optionOrder = c.progress.optionOrder instanceof Map
       ? Object.fromEntries(c.progress.optionOrder) : (c.progress.optionOrder || {});
@@ -796,17 +864,14 @@ exports.submitCandidate = async (req, res) => {
       ? Math.floor((now() - new Date(c.startedAt).getTime()) / 1000) : 0;
 
     if (violations && typeof violations === "object") {
-      const fs = Math.max(c.violations?.fullscreenExits || 0, violations.fullscreenExits || 0);
-      const ts = Math.max(c.violations?.tabSwitches || 0, violations.tabSwitches || 0);
-      const fl = Math.max(c.violations?.focusLoss || 0, violations.focusLoss || 0);
-      const mf = Math.max(c.violations?.multipleFaces || 0, violations.multipleFaces || 0);
-      c.violations = { fullscreenExits: fs, tabSwitches: ts, focusLoss: fl, multipleFaces: mf, total: fs + ts + fl + mf };
+      c.violations = mergeViolations(c.violations, violations);
     }
 
     // Disqualification (auto-terminate on malpractice) vs normal completion.
     const disqualified = reason === "auto-malpractice";
     c.status = disqualified ? "disqualified" : "completed";
     c.submissionReason = disqualified ? "disqualified" : (timedOut ? "timed-out" : "manual");
+    if (disqualified) c.terminationReason = String(terminationReason || "Assessment guidelines violated").slice(0, 200);
     c.completedAt = new Date();
     c.score = score;
     c.totalMarks = totalMarks;

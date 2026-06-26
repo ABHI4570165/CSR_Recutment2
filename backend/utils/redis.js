@@ -6,7 +6,18 @@ let warnOnce = false;
 function createClient() {
   if (client) return client;
 
-  client = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
+  // No REDIS_URL (e.g. Hostinger shared Node.js) → run without cache. cacheGet
+  // returns null so callers fall through to the database. No connection attempts,
+  // no error spam.
+  if (!process.env.REDIS_URL) {
+    if (!warnOnce) {
+      console.log("ℹ️  Redis disabled (REDIS_URL not set) — caching falls back to direct DB reads.");
+      warnOnce = true;
+    }
+    return null;
+  }
+
+  client = new Redis(process.env.REDIS_URL, {
     maxRetriesPerRequest: 1,
     enableReadyCheck: false,   // don't block on ready check
     lazyConnect: true,         // don't auto-connect — connect on first use

@@ -501,19 +501,64 @@ const LINK_SEND_OPTIONS = [
   { value:"custom",      label:"Custom Date & Time" },
 ];
 
+// Human-readable violation breakdown for the dashboard tooltip.
+const VIOL_LABELS = {
+  fullscreenExits:"Fullscreen exits", tabSwitches:"Tab switches", focusLoss:"Focus loss", multipleFaces:"Multiple faces",
+  refresh:"Refreshes", devtools:"DevTools", clipboard:"Clipboard", idle:"Idle", windowResize:"Window resize",
+  location:"Location", cameraDisconnect:"Camera disconnect", faceHidden:"Face hidden",
+};
+function violBreakdown(c){
+  const v=c.violations||{};
+  const parts=Object.entries(VIOL_LABELS).filter(([k])=>(v[k]||0)>0).map(([k,l])=>`${l}: ${v[k]}`);
+  return parts.length?parts.join("\n"):"No violations";
+}
+
 const SECURITY_KEYS = [
   ["desktopOnly",           "Desktop Only"],
   ["fullscreenEnforcement", "Fullscreen Enforcement"],
   ["cameraMonitoring",      "Camera Monitoring"],
   ["faceVerification",      "Face Verification"],
   ["multipleFaceDetection", "Multiple Face Detection"],
+  ["faceVisibilityDetection","Face Visibility (auto-terminate)"],
+  ["cameraDisconnectDetection","Camera Disconnect Detection"],
   ["tabSwitchDetection",    "Tab Switch Detection"],
   ["violationTracking",     "Violation Tracking"],
+  ["refreshProtection",     "Browser Refresh Protection"],
+  ["rightClickProtection",  "Right-Click / Copy-Paste Block"],
+  ["keyboardBlocking",      "Keyboard Shortcut Blocking"],
+  ["devToolsDetection",     "DevTools Detection"],
+  ["clipboardMonitoring",   "Clipboard Monitoring"],
+  ["idleDetection",         "Idle Detection"],
+  ["windowResizeDetection", "Window Resize Detection"],
+  ["screenResolutionCheck", "Screen Resolution Check"],
+  ["browserCompatibility",  "Browser Compatibility"],
+  ["incognitoDetection",    "Incognito Detection"],
 ];
-const DEFAULT_SECURITY = SECURITY_KEYS.reduce((o, [k]) => (o[k] = true, o), {});
+const DEFAULT_SECURITY = SECURITY_KEYS.reduce((o, [k]) => (o[k] = true, o), { locationRestriction: false });
+const DEFAULT_SEC_CONFIG = {
+  maxViolations: 3, idleSeconds: 120, clipboardLimit: 3, minScreenWidth: 1024, minScreenHeight: 600,
+  cameraGraceSeconds: 10, location: { lat: null, lng: null, radiusMeters: 200, label: "" },
+};
 
-function SecurityToggles({ value, onChange }) {
+function SecurityToggles({ value, onChange, config, onConfigChange }) {
   const v = value || DEFAULT_SECURITY;
+  const cfg = { ...DEFAULT_SEC_CONFIG, ...(config || {}), location: { ...DEFAULT_SEC_CONFIG.location, ...((config || {}).location || {}) } };
+  const setCfg = (patch) => onConfigChange({ ...cfg, ...patch });
+  const setLoc = (patch) => onConfigChange({ ...cfg, location: { ...cfg.location, ...patch } });
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) { alert("Geolocation not supported by this browser."); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => setLoc({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }),
+      (e) => alert("Could not get location: " + e.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+  const numField = (label, key, min = 0) => (
+    <div className="ad-field">
+      <label className="ad-label">{label}</label>
+      <input className="ad-input" type="number" min={min} value={cfg[key]} onChange={e => setCfg({ [key]: Number(e.target.value) })} />
+    </div>
+  );
   return (
     <div className="ad-field" style={{marginTop:10}}>
       <label className="ad-label">Assessment Security (all on by default)</label>
@@ -525,6 +570,40 @@ function SecurityToggles({ value, onChange }) {
           </label>
         ))}
       </div>
+
+      <div className="ad-label" style={{marginTop:14}}>Security Configuration</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px 12px",marginTop:4}}>
+        {numField("Max Violations","maxViolations",1)}
+        {numField("Idle Timeout (sec)","idleSeconds",10)}
+        {numField("Clipboard Limit","clipboardLimit",1)}
+        {numField("Min Screen Width","minScreenWidth",320)}
+        {numField("Min Screen Height","minScreenHeight",240)}
+        {numField("Camera Grace (sec)","cameraGraceSeconds",3)}
+      </div>
+
+      {/* ── Batch B: Location restriction ── */}
+      <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,cursor:"pointer",marginTop:14,fontWeight:700}}>
+        <input type="checkbox" checked={v.locationRestriction===true} onChange={e=>onChange({...v,locationRestriction:e.target.checked})}/>
+        📍 Location Restriction (candidate must be within radius)
+      </label>
+      {v.locationRestriction===true && (
+        <div style={{marginTop:8,padding:12,border:"1px solid var(--border)",borderRadius:10,background:"var(--surface-2)"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px 12px"}}>
+            <div className="ad-field"><label className="ad-label">Latitude</label>
+              <input className="ad-input" type="number" step="0.000001" value={cfg.location.lat ?? ""} onChange={e=>setLoc({lat:e.target.value===""?null:Number(e.target.value)})}/></div>
+            <div className="ad-field"><label className="ad-label">Longitude</label>
+              <input className="ad-input" type="number" step="0.000001" value={cfg.location.lng ?? ""} onChange={e=>setLoc({lng:e.target.value===""?null:Number(e.target.value)})}/></div>
+            <div className="ad-field"><label className="ad-label">Radius (metres)</label>
+              <select className="ad-select" value={cfg.location.radiusMeters} onChange={e=>setLoc({radiusMeters:Number(e.target.value)})}>
+                <option value={100}>100 m</option><option value={200}>200 m</option><option value={500}>500 m</option><option value={1000}>1 km</option>
+              </select></div>
+          </div>
+          <div className="ad-field" style={{marginTop:8}}><label className="ad-label">Location Label (optional)</label>
+            <input className="ad-input" value={cfg.location.label} placeholder="e.g. RVCE Main Block" onChange={e=>setLoc({label:e.target.value})}/></div>
+          <button type="button" className="ad-btn ad-btn--outline ad-btn--sm" style={{marginTop:8}} onClick={useCurrentLocation}>📍 Use My Current Location</button>
+          {cfg.location.lat!=null && <span style={{fontSize:12,color:"var(--text-3)",marginLeft:10}}>Set: {cfg.location.lat}, {cfg.location.lng}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -551,6 +630,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
   const [linkSendCustom,setLinkSendCustom]=useState("");
   const [secs,setSecs]=useState(()=>(sections||[]).map(s=>({...s,include:true})));
   const [security,setSecurity]=useState({...DEFAULT_SECURITY});
+  const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG});
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
@@ -572,7 +652,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
         linkSendOption,
         linkSendAt: linkSendOption==="custom" ? new Date(linkSendCustom).toISOString() : undefined,
         ...(driveType==="WALK_IN" && maxCandidates ? { maxCandidates:Number(maxCandidates) } : {}),
-        security,
+        security, securityConfig:secConfig,
       });
       onCreated();
     }catch(e){ setErr(e.message||"Failed to create."); }
@@ -637,7 +717,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
             {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
           </div>
         </div>
-        <SecurityToggles value={security} onChange={setSecurity}/>
+        <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
         {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
@@ -655,6 +735,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
   const [cutoff,setCutoff]=useState(drive.cutoff??"");
   const [maxCandidates,setMaxCandidates]=useState(drive.maxCandidates??"");
   const [security,setSecurity]=useState({...DEFAULT_SECURITY,...(drive.security||{})});
+  const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG,...(drive.securityConfig||{}),location:{...DEFAULT_SEC_CONFIG.location,...((drive.securityConfig||{}).location||{})}});
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
@@ -665,7 +746,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
         name:name.trim(), status, durationMinutes:Number(duration)||40,
         cutoff: cutoff===""?null:Number(cutoff),
         ...(drive.driveType==="WALK_IN" ? { maxCandidates: maxCandidates===""?null:Number(maxCandidates) } : {}),
-        security,
+        security, securityConfig:secConfig,
       });
       onSaved();
     }catch(e){ setErr(e.message||"Failed to save."); }
@@ -696,7 +777,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
               <span className="ad-hint">{drive.walkInCount||0} registered so far.</span></div>
           )}
         </div>
-        <SecurityToggles value={security} onChange={setSecurity}/>
+        <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
         {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
@@ -922,6 +1003,8 @@ function DrivesTab() {
         Score:c.score??"-", "Total":c.totalMarks??"-",
         Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
         Status:c.status, Violations:c.violations?.total||0,
+        Refreshes:c.refreshCount||0, "Termination Reason":c.terminationReason||"",
+        "Location":c.geo&&c.geo.inside!=null?(c.geo.inside?"Inside":"Outside"):"", "Distance(m)":c.geo?.distance??"",
         Selected:(cutoff!=null&&c.score!=null)?(c.score>=cutoff?"Yes":"No"):"-",
         Completed:fmtDate(c.completedAt),
       })));
@@ -1140,11 +1223,15 @@ function DrivesTab() {
                 <td><div className="ad-td-name"><div className="ad-avatar">{c.name.charAt(0)}</div>{c.name}</div></td>
                 <td className="ad-td-sm">{c.college}</td>
                 <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
-                <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
+                <td>
+                  <span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span>
+                  {c.status==="disqualified"&&c.terminationReason&&<div style={{fontSize:11,color:"#DC2626",marginTop:3}}>⛔ {c.terminationReason}</div>}
+                  {c.geo&&c.geo.inside!=null&&<div style={{fontSize:11,color:c.geo.inside?"#059669":"#DC2626",marginTop:2}}>📍 {c.geo.inside?"Inside":"Outside"}{c.geo.distance!=null?` · ${c.geo.distance}m`:""}</div>}
+                </td>
                 {!isWalkIn&&<td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>}
                 {!isWalkIn&&<td className="ad-td-sm">{c.emailStatus}</td>}
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
-                <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
+                <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`} title={violBreakdown(c)}>{c.violations?.total||0}</span>{(c.refreshCount||0)>0&&<span title="Refreshes" style={{fontSize:11,color:"#D97706",marginLeft:4}}>↻{c.refreshCount}</span>}</td>
                 <td style={{display:"flex",gap:4}}>
                   <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button>
                   {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>getResume(c)}>📄 CV</button>}
@@ -1195,6 +1282,8 @@ function AllCandidatesTab() {
         Resume:c.resume?.filename?"Yes":"No", Score:c.score??"-", Total:c.totalMarks??"-",
         Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
         Status:c.status, Violations:c.violations?.total||0,
+        Refreshes:c.refreshCount||0, "Termination Reason":c.terminationReason||"",
+        "Location":c.geo&&c.geo.inside!=null?(c.geo.inside?"Inside":"Outside"):"", "Distance(m)":c.geo?.distance??"",
         Selected:(c.drive?.cutoff!=null&&c.score!=null)?(c.score>=c.drive.cutoff?"Yes":"No"):"-",
         Completed:fmtDate(c.completedAt),
       })));
