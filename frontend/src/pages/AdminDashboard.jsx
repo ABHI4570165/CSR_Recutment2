@@ -704,14 +704,15 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
             : <span className="ad-hint">Shortlist email sends immediately on upload. The assessment link sends {linkSendOption==="immediately"?"immediately":`${LINK_SEND_OPTIONS.find(o=>o.value===linkSendOption)?.label.toLowerCase()}`}.</span>}
         </div>}
         <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Sections (drawn from the shared question pool)</label>
-          <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4}}>
+          <div className="ad-sec-pick-list">
             {secs.map((s,i)=>(
-              <div key={s.name} style={{display:"flex",alignItems:"center",gap:10,background:"#F8F7FF",borderRadius:8,padding:"8px 10px"}}>
-                <input type="checkbox" checked={s.include} onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
-                <span style={{flex:1,fontSize:13,fontWeight:600}}>{s.displayName}</span>
-                <input type="number" className="ad-input" style={{width:80,height:34}} value={s.questionCount} min={1}
+              <div key={s.name} className={`ad-sec-pick ${s.include?"ad-sec-pick--on":""}`}>
+                <input type="checkbox" checked={s.include} aria-label={`Include ${s.displayName}`}
+                  onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
+                <span className="ad-sec-pick-name">{s.displayName}</span>
+                <input type="number" className="ad-input ad-sec-pick-count" value={s.questionCount} min={1} aria-label={`Question count for ${s.displayName}`}
                   onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
-                <span style={{fontSize:11,color:"var(--text-3)"}}>Qs</span>
+                <span className="ad-sec-pick-qs">Qs</span>
               </div>
             ))}
             {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
@@ -1931,7 +1932,7 @@ function Dashboard({ onLogout }) {
               {/* Add new section */}
               <div className="ad-new-sec-box">
                 <div className="ad-label" style={{marginBottom:10}}>+ Add New Section</div>
-                <div className="ad-sec-row" style={{background:"#F8F7FF",borderRadius:10,padding:14}}>
+                <div className="ad-sec-row" style={{background:"var(--surface-2)",borderRadius:10,padding:14}}>
                   <div className="ad-field" style={{flex:1}}>
                     <label className="ad-label">Display Name</label>
                     <input className="ad-input" placeholder="e.g. General Knowledge" value={newSec.displayName}

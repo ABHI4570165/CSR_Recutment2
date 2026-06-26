@@ -14,6 +14,8 @@
   --font:'Inter',sans-serif; --serif:'Playfair Display',serif;
 }
 body { font-family:var(--font); background:var(--bg); color:var(--text-1); -webkit-font-smoothing:antialiased; }
+/* Consistent themed checkboxes across the admin UI */
+.ad-page input[type="checkbox"], .ad-modal input[type="checkbox"] { accent-color:var(--primary); }
 
 /* Login */
 .ad-login-page { min-height:100vh; background:linear-gradient(145deg,#4F46E5,#7C3AED,#3730A3); display:flex; align-items:center; justify-content:center; padding:24px; }
@@ -155,7 +157,7 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-1); -webk
 
 /* Modal */
 .ad-overlay { position:fixed; inset:0; background:rgba(30,27,75,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; backdrop-filter:blur(4px); }
-.ad-modal { background:#fff; border-radius:20px; padding:28px; max-width:440px; width:100%; box-shadow:0 24px 60px rgba(0,0,0,0.2); animation:popIn .22s ease; }
+.ad-modal { background:#fff; border-radius:20px; padding:28px; max-width:440px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 24px 60px rgba(0,0,0,0.2); animation:popIn .22s ease; }
 .ad-modal--sm { max-width:380px; }
 @keyframes popIn { from{transform:scale(.95);opacity:0} to{transform:scale(1);opacity:1} }
 .ad-modal-title { font-family:var(--serif); font-size:18px; font-weight:800; color:var(--text-1); margin-bottom:10px; }
@@ -248,6 +250,19 @@ body { font-family:var(--font); background:var(--bg); color:var(--text-1); -webk
 /* Section title with a leading gradient bar */
 .ad-page-title { display:flex; align-items:center; gap:10px; }
 .ad-page-title::before { content:""; width:5px; height:22px; border-radius:4px; background:linear-gradient(180deg,var(--primary),var(--secondary)); }
+
+/* ── Section picker (Create/Edit drive) — theme-aware, high-contrast, aligned ── */
+.ad-sec-pick-list { display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+.ad-sec-pick {
+  display:flex; align-items:center; gap:12px;
+  background:var(--surface-2); border:1.5px solid var(--border); border-radius:10px;
+  padding:10px 14px; transition:border-color .15s, background .15s;
+}
+.ad-sec-pick--on { border-color:var(--primary); background:var(--primary-lt); }
+.ad-sec-pick input[type="checkbox"] { width:18px; height:18px; accent-color:var(--primary); flex-shrink:0; cursor:pointer; margin:0; }
+.ad-sec-pick-name { flex:1; font-size:14px; font-weight:700; color:var(--text-1); }   /* explicit contrast — fixes invisible names */
+.ad-sec-pick-count { width:74px !important; height:38px !important; text-align:center; padding:0 8px !important; }
+.ad-sec-pick-qs { font-size:11px; font-weight:700; color:var(--text-3); text-transform:uppercase; letter-spacing:.4px; min-width:18px; }
 
 /* ════════════════════════════════════════════════════════════════════════
    THEME TOGGLE BUTTON
