@@ -1,0 +1,48 @@
+name: Keep Render backends awake
+
+# Two ways to run:
+#  1) Scheduled every 10 min → 24/7 keep-awake (GitHub cron can be a few min late, but
+#     usually keeps Render — which sleeps after 15 min idle — awake).
+#  2) Manual "Run workflow" → runs a tight loop pinging all 5 every 5 min for ~5.5 h.
+#     Trigger this on exam day for guaranteed coverage through the assessment window.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"      # every 10 minutes, 24/7
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Hours to keep pinging (manual run, exam window)"
+        default: "5"
+        required: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping all 5 backends
+        run: |
+          URLS=(
+            "https://csr-recutment2-by0j.onrender.com/api/health"
+            "https://csr-recutment2-1.onrender.com/api/health"
+            "https://csr-recutment2-gyrc.onrender.com/api/health"
+            "https://csr-recutment2-7i09.onrender.com/api/health"
+            "https://csr-recutment2.onrender.com/api/health"
+          )
+          ping_all () {
+            for u in "${URLS[@]}"; do
+              code=$(curl -s -m 60 -o /dev/null -w "%{http_code}" "$u" || echo "ERR")
+              echo "$(date -u +%H:%M:%S)  $u -> $code"
+            done
+          }
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            HOURS="${{ github.event.inputs.hours }}"; HOURS="${HOURS:-5}"
+            ROUNDS=$(( HOURS * 12 ))          # every 5 min
+            echo "Manual run: pinging every 5 min for ~$HOURS h ($ROUNDS rounds)"
+            for i in $(seq 1 $ROUNDS); do
+              echo "--- round $i/$ROUNDS ---"; ping_all
+              [ "$i" -lt "$ROUNDS" ] && sleep 300
+            done
+          else
+            echo "Scheduled run: one round"; ping_all
+          fi

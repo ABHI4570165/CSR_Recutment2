@@ -102,3 +102,42 @@ function startAutoOffScheduler() {
 }
 
 exports.startAutoOffScheduler = startAutoOffScheduler;
+
+// ── Server-side keep-alive (the real fix) ──────────────────────────────────────
+// While Active Mode is ON, each running instance pings EVERY backend URL every
+// 10 min (an outbound→inbound request is what stops Render from sleeping — no
+// browser tab needed). Because every instance cross-pings all 5, any one awake
+// instance keeps the WHOLE fleet awake (and wakes a sleeping sibling).
+//   KEEPALIVE_URLS = comma-separated list of all 5 backend URLs (recommended)
+//   else falls back to SELF_PING_URL / RENDER_EXTERNAL_URL (self only)
+let keepAliveTimer = null;
+const KEEPALIVE_MS = parseInt(process.env.KEEPALIVE_MS) || 10 * 60 * 1000; // 10 min < Render's 15-min sleep
+function keepAliveTargets() {
+  const list = (process.env.KEEPALIVE_URLS || process.env.SELF_PING_URL || process.env.RENDER_EXTERNAL_URL || "")
+    .split(",").map((s) => s.trim().replace(/\/+$/, "")).filter(Boolean);
+  return [...new Set(list)];
+}
+function startKeepAlive() {
+  if (keepAliveTimer) return;
+  const targets = keepAliveTargets();
+  if (!targets.length) {
+    console.warn("⏰  Keep-alive idle — set KEEPALIVE_URLS (all 5 backend URLs) or RENDER_EXTERNAL_URL.");
+    return;
+  }
+  if (typeof fetch !== "function") { console.warn("⏰  Keep-alive needs Node 18+ (global fetch)."); return; }
+  console.log(`⏰  Keep-alive armed → ${targets.length} backend(s) every ${KEEPALIVE_MS / 60000} min while Active Mode is ON`);
+  const pingAll = async () => {
+    const doc = await SystemConfig.getSingleton();
+    if (!doc.activeMode) return;                       // only ping while Active Mode is on
+    await Promise.all(targets.map(async (url) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 12000);
+      try { const r = await fetch(`${url}/api/health`, { signal: ctrl.signal }); console.log(`⏰  keep-alive ${url} → ${r.status}`); }
+      catch (e) { console.warn(`⏰  keep-alive ${url} failed: ${e.message}`); }
+      finally { clearTimeout(t); }
+    }));
+  };
+  keepAliveTimer = setInterval(() => { pingAll().catch(() => {}); }, KEEPALIVE_MS);
+  keepAliveTimer.unref?.();
+}
+exports.startKeepAlive = startKeepAlive;
