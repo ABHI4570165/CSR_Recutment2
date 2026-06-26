@@ -237,6 +237,7 @@ export default function AssessmentPage() {
   const camGoneSinceRef = useRef(0);
   const faceGoneSinceRef = useRef(0);
   const [incognito, setIncognito] = useState(null); // null=unknown, true/false
+  const [showId, setShowId] = useState(false);       // candidate identity popover (top-right)
   const [geoBlock, setGeoBlock] = useState(null);    // {distance,radius,msg} location block
 
   const [nowTick, setNowTick] = useState(Date.now());
@@ -968,7 +969,6 @@ export default function AssessmentPage() {
       <div className="asmt-landing">
         <header className="asmt-top">
           <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />M H FOUNDATION</div>
-          <div className="asmt-partner">Hiring Partner · Inference Labs Pvt. Ltd.</div>
         </header>
         <div className="asmt-landing-body">
           <div className="asmt-card">
@@ -1002,7 +1002,6 @@ export default function AssessmentPage() {
       <div className="asmt-landing">
         <header className="asmt-top">
           <div className="asmt-brand"><BrandLogo className="asmt-logo-img" />M H FOUNDATION</div>
-          <div className="asmt-partner">Hiring Partner · Inference Labs Pvt. Ltd.</div>
         </header>
         <div className="asmt-rules-body">
           <div className="asmt-rules-card">
@@ -1163,18 +1162,14 @@ export default function AssessmentPage() {
         <div className="asmt-net-banner" style={{ background: "#b45309" }}>👤 {faceWarn}</div>
       )}
 
-      {/* Floating proctoring panel: webcam (never stored) + identity card */}
+      {/* Floating proctoring panel: webcam (never stored). Identity moved to the
+          header avatar button (top-right) — see .asmt-id-wrap. */}
       {camOn && (
         <div className="asmt-cam-float">
           <video ref={videoRef} autoPlay playsInline muted />
           <span className="asmt-cam-dot" /> LIVE
         </div>
       )}
-      <div className="asmt-id-card">
-        <div className="asmt-id-name">{info?.name}</div>
-        <div className="asmt-id-line">{info?.college}</div>
-        <div className="asmt-id-line asmt-id-assess">{info?.assessmentName}</div>
-      </div>
 
       {/* Corporate header */}
       <header className="qp-header asmt-corp-header">
@@ -1183,7 +1178,7 @@ export default function AssessmentPage() {
             <BrandLogo className="asmt-header-logo" />
             <div>
               <div className="qp-brand-title">M H FOUNDATION</div>
-              <div className="qp-brand-welcome">Inference Labs Private Limited · {info?.assessmentName}</div>
+              <div className="qp-brand-welcome">{info?.assessmentName}</div>
             </div>
           </div>
           <div className="qp-header-right">
@@ -1196,6 +1191,21 @@ export default function AssessmentPage() {
               Violations {violCount}/{maxViol} · {remainingViol} left
             </div>
             <div className={`qp-timer ${danger ? "qp-timer--danger" : ""}`}>⏱ {fmtTime(timeLeft)}</div>
+            <div className="asmt-id-wrap">
+              <button className="asmt-id-btn" onClick={() => setShowId(v => !v)} title="Your details" aria-label="Your details">
+                {(info?.name || "?").charAt(0).toUpperCase()}
+              </button>
+              {showId && (
+                <>
+                  <div className="asmt-id-backdrop" onClick={() => setShowId(false)} />
+                  <div className="asmt-id-pop">
+                    <div className="asmt-id-pop-name">{info?.name}</div>
+                    <div className="asmt-id-pop-row"><span>College</span>{info?.college || "—"}</div>
+                    <div className="asmt-id-pop-row"><span>Email</span>{info?.email || "—"}</div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>

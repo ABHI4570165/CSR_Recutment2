@@ -123,10 +123,23 @@ export default function WalkInPortal() {
     } catch (e) { setErr(e.message || "Could not resume."); setBusy(false); }
   };
 
+  const collegeOptions = drive?.colleges || [];
   const inputFor = ([k, label, type, req]) => (
     <div key={k} className={`wp-field ${k === "name" || k === "college" || k === "location" ? "wp-field--full" : ""}`}>
       <label className="wp-label">{label}{req && <span className="wp-req"> *</span>}</label>
-      {type === "select" ? (
+      {k === "college" ? (
+        // College must be SELECTED from the drive's list — no free typing.
+        collegeOptions.length ? (
+          <select className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} value={form[k]} onChange={set(k)}>
+            <option value="">Select your college…</option>
+            {collegeOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        ) : (
+          <select className="wp-input" value="" disabled>
+            <option value="">Verify your test code first to load colleges</option>
+          </select>
+        )
+      ) : type === "select" ? (
         <select className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} value={form[k]} onChange={set(k)}>
           <option value="">Select…</option><option>Male</option><option>Female</option><option>Other</option>
         </select>

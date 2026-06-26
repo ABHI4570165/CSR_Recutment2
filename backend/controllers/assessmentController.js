@@ -73,6 +73,7 @@ exports.createAssessment = async (req, res) => {
       ...(testCode ? { testCode } : {}),
       ...(b.status && ["DRAFT","ACTIVE","COMPLETED","ARCHIVED"].includes(b.status) ? { status: b.status } : {}),
       ...(b.college ? { college: String(b.college).trim() } : {}),
+      ...(Array.isArray(b.colleges) ? { colleges: b.colleges.map((s) => String(s).trim()).filter(Boolean) } : {}),
       ...(b.cutoff != null && b.cutoff !== "" ? { cutoff: parseInt(b.cutoff) } : {}),
       ...(b.maxCandidates != null && b.maxCandidates !== "" ? { maxCandidates: parseInt(b.maxCandidates) } : {}),
       ...(b.expectedCandidates != null && b.expectedCandidates !== "" ? { expectedCandidates: parseInt(b.expectedCandidates) } : {}),
@@ -124,7 +125,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig"];
+      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
@@ -571,6 +572,7 @@ function publicCandidateView(c, assessment) {
   const loc = cfg.location || {};
   return {
     name: c.name,
+    email: c.email,
     college: c.college,
     assessmentName: assessment.name,
     durationMinutes: assessment.durationMinutes,

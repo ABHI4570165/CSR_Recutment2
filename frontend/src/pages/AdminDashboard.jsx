@@ -631,10 +631,13 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
   const [secs,setSecs]=useState(()=>(sections||[]).map(s=>({...s,include:true})));
   const [security,setSecurity]=useState({...DEFAULT_SECURITY});
   const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG});
+  const [collegesText,setCollegesText]=useState("");
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
+    const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
+    if(driveType==="WALK_IN" && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
     const chosen=secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
     if(!chosen.length){ setErr("Select at least one section."); return; }
     if(!date){ setErr("Assessment date is required."); return; }
@@ -652,6 +655,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
         linkSendOption,
         linkSendAt: linkSendOption==="custom" ? new Date(linkSendCustom).toISOString() : undefined,
         ...(driveType==="WALK_IN" && maxCandidates ? { maxCandidates:Number(maxCandidates) } : {}),
+        colleges:collegesArr,
         security, securityConfig:secConfig,
       });
       onCreated();
@@ -693,6 +697,11 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
               <div className="ad-field"><label className="ad-label">Passing Score (internal)</label>
                 <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
             </div>
+            {driveType==="WALK_IN" && (
+              <div className="ad-field" style={{marginTop:12}}><label className="ad-label">Colleges — one per line (students pick from this dropdown)</label>
+                <textarea className="ad-input ad-textarea" rows={4} value={collegesText} placeholder={"RV College of Engineering\nBMS College of Engineering\nPES University"} onChange={e=>setCollegesText(e.target.value)}/>
+                <span className="ad-hint">Candidates can only select from these — they can't type their own college.</span></div>
+            )}
           </section>
 
           <section className="ad-card-section">
@@ -762,6 +771,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
   const [maxCandidates,setMaxCandidates]=useState(drive.maxCandidates??"");
   const [security,setSecurity]=useState({...DEFAULT_SECURITY,...(drive.security||{})});
   const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG,...(drive.securityConfig||{}),location:{...DEFAULT_SEC_CONFIG.location,...((drive.securityConfig||{}).location||{})}});
+  const [collegesText,setCollegesText]=useState((drive.colleges||[]).join("\n"));
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
@@ -772,6 +782,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
         name:name.trim(), status, durationMinutes:Number(duration)||40,
         cutoff: cutoff===""?null:Number(cutoff),
         ...(drive.driveType==="WALK_IN" ? { maxCandidates: maxCandidates===""?null:Number(maxCandidates) } : {}),
+        colleges: collegesText.split("\n").map(s=>s.trim()).filter(Boolean),
         security, securityConfig:secConfig,
       });
       onSaved();
@@ -813,6 +824,11 @@ function EditDriveModal({ drive, onClose, onSaved }) {
                   <span className="ad-hint">{drive.walkInCount||0} registered so far.</span></div>
               )}
             </div>
+            {drive.driveType==="WALK_IN" && (
+              <div className="ad-field" style={{marginTop:12}}><label className="ad-label">Colleges — one per line (students pick from this dropdown)</label>
+                <textarea className="ad-input ad-textarea" rows={4} value={collegesText} placeholder={"RV College of Engineering\nBMS College of Engineering"} onChange={e=>setCollegesText(e.target.value)}/>
+                <span className="ad-hint">Candidates can only select from these — they can't type their own college.</span></div>
+            )}
           </section>
 
           <section className="ad-card-section">

@@ -33,6 +33,7 @@ function publicDrive(d) {
     assessmentName: d.name,
     durationMinutes: d.durationMinutes,
     college: d.college || "",
+    colleges: Array.isArray(d.colleges) ? d.colleges : [],   // walk-in college dropdown options
     startAt: d.startAt || null,
     endAt: d.endAt || null,
     capacity: d.maxCandidates != null ? { current: d.walkInCount, max: d.maxCandidates } : null,
@@ -175,6 +176,7 @@ exports.registerWalkIn = async (req, res) => {
         assessmentId: drive._id,
         name, email, college,
         candidateSource: "WALK_IN",
+        isTestCandidate: process.env.TEST_MODE === "true",   // tag load-test rows for safe cleanup
         usn: b.usn, phone: b.phone, gender: b.gender, dob: b.dob, aadhaar: b.aadhaar, location: b.location,
         course: b.course, branch: b.branch,
         ...(resume ? { resume } : {}),

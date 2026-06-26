@@ -51,6 +51,7 @@ const assessmentSchema = new mongoose.Schema({
   driveType: { type: String, enum: ["PRE_REGISTERED", "WALK_IN"], default: "PRE_REGISTERED", index: true },
   status:    { type: String, enum: ["DRAFT", "ACTIVE", "COMPLETED", "ARCHIVED"], default: "ACTIVE", index: true },
   college:   { type: String, trim: true, default: "" },          // optional drive-level college label
+  colleges:  { type: [String], default: [] },                    // walk-in: candidates pick from this list (no free typing)
   cutoff:    { type: Number, default: null },                    // selection cutoff (derived "selected" = score >= cutoff)
 
   // Walk-in only
