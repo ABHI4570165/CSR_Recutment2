@@ -63,26 +63,27 @@ function CenterCard({ icon, title, message, children }) {
   );
 }
 
-function ViolationModal({ count, reason, onDismiss }) {
+function ViolationModal({ count, max = MAX_VIOLATIONS, reason, onDismiss }) {
   const sub = reason === "multipleFaces"
     ? "More than one person was detected in your camera. Only the candidate may be visible during the assessment."
     : "You exited fullscreen, switched tabs, or left the window. This assessment must be taken in fullscreen.";
+  const remaining = Math.max(0, max - count);
   return (
     <div className="qp-viol-overlay">
       <div className="qp-viol-modal">
         <div className="qp-viol-icon-wrap">{reason === "multipleFaces" ? "👥" : "⚠️"}</div>
-        <h2 className="qp-viol-title">Warning {count} of {MAX_VIOLATIONS}</h2>
+        <h2 className="qp-viol-title">Warning {count} of {max}</h2>
         <p className="qp-viol-sub">{sub}</p>
-        <div className="qp-viol-count"><span className="qp-viol-num">{count}</span><span className="qp-viol-of">/ {MAX_VIOLATIONS}</span></div>
+        <div className="qp-viol-count"><span className="qp-viol-num">{count}</span><span className="qp-viol-of">/ {max}</span></div>
         <div className="qp-viol-dots">
-          {Array.from({ length: MAX_VIOLATIONS }).map((_, i) => (
+          {Array.from({ length: max }).map((_, i) => (
             <div key={i} className={`qp-viol-dot ${i < count ? "qp-viol-dot--filled" : ""}`} />
           ))}
         </div>
         <p className="qp-viol-warn">
-          {MAX_VIOLATIONS - count === 1
+          {remaining === 1
             ? "⚠ One more violation will DISQUALIFY you and terminate your assessment."
-            : `${MAX_VIOLATIONS - count} more violations will disqualify you.`}
+            : `${remaining} more violations will disqualify you.`}
         </p>
         <button className="qp-viol-btn" onClick={onDismiss}>Return to Fullscreen</button>
       </div>
@@ -1124,12 +1125,13 @@ export default function AssessmentPage() {
   const answeredReview = reviewIdsArr.filter(id => answers[id] != null).length;
   const reviewOnly     = reviewIdsArr.length - answeredReview;
   const unanswered     = questions.length - answeredCount;
-  const remainingViol  = MAX_VIOLATIONS - violCount;
+  const maxViol        = info?.securityConfig?.maxViolations || MAX_VIOLATIONS; // per-drive config
+  const remainingViol  = Math.max(0, maxViol - violCount);
   const lastChance     = remainingViol === 1;
 
   return (
     <div className="qp-root">
-      {showViol && <ViolationModal count={violCount} reason={violReason} onDismiss={dismissViolation} />}
+      {showViol && <ViolationModal count={violCount} max={maxViol} reason={violReason} onDismiss={dismissViolation} />}
       {showRules && <RulesModal onClose={() => setShowRules(false)} />}
 
       {showConf && (
@@ -1168,7 +1170,7 @@ export default function AssessmentPage() {
           <span className="asmt-cam-dot" /> LIVE
         </div>
       )}
-      <div className="asmt-id-card" style={camOn ? undefined : { bottom: 18 }}>
+      <div className="asmt-id-card">
         <div className="asmt-id-name">{info?.name}</div>
         <div className="asmt-id-line">{info?.college}</div>
         <div className="asmt-id-line asmt-id-assess">{info?.assessmentName}</div>
@@ -1191,7 +1193,7 @@ export default function AssessmentPage() {
               {saveState === "saving" ? "Saving…" : lastSaved ? `Saved ${lastSaved.toLocaleTimeString()}` : "Saved"}
             </div>
             <div className={`asmt-viol-counter ${lastChance ? "asmt-viol-counter--danger" : ""}`}>
-              Violations {violCount}/{MAX_VIOLATIONS} · {remainingViol} left
+              Violations {violCount}/{maxViol} · {remainingViol} left
             </div>
             <div className={`qp-timer ${danger ? "qp-timer--danger" : ""}`}>⏱ {fmtTime(timeLeft)}</div>
           </div>

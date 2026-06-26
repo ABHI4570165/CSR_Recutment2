@@ -205,10 +205,11 @@
 
 /* ── Identity card near webcam ────────────────────────────────────────────────── */
 .asmt-id-card {
-  position: fixed; right: 18px; bottom: 152px; z-index: 39; width: 168px;
+  position: fixed; left: 18px; bottom: 18px; right: auto; z-index: 39; width: 200px; max-width: 40vw;
   background: #fff; border: 1px solid var(--asmt-line); border-radius: 10px;
   padding: 10px 12px; box-shadow: 0 6px 18px rgba(15,23,42,.14);
 }
+.asmt-id-name, .asmt-id-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .asmt-id-name { font-size: 13px; font-weight: 800; color: var(--asmt-ink); line-height: 1.2; }
 .asmt-id-line { font-size: 11px; color: var(--asmt-muted); margin-top: 3px; line-height: 1.3; }
 .asmt-id-assess { color: var(--asmt-primary); font-weight: 600; }
