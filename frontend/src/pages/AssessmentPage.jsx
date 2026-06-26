@@ -27,8 +27,6 @@ function isFullscreen() {
 
 /* ── Pre-assessment rules ────────────────────────────────────────────────────── */
 const RULES = [
-  ["🧍", "Ensure you are alone in a quiet room."],
-  ["🚫", "No other person should be present near you."],
   ["📷", "Keep your face visible throughout the assessment."],
   ["🗂️", "Do not switch tabs or applications."],
   ["🖥️", "Do not exit fullscreen mode."],

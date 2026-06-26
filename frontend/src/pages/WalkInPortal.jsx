@@ -217,7 +217,7 @@ export default function WalkInPortal() {
 
               {err && <div className="wp-err wp-shake">{err}</div>}
               <button className="wp-btn" onClick={submit} disabled={busy}>{busy ? <><span className="wp-spin" /> Starting…</> : "START ASSESSMENT"}</button>
-              <p className="wp-note">On start you'll enter fullscreen with your camera on. A laptop/desktop and a quiet room are required.</p>
+              <p className="wp-note">On start you'll enter fullscreen. A laptop or desktop computer is required.</p>
             </>
           ) : (
             <>
