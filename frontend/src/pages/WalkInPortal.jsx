@@ -129,15 +129,19 @@ export default function WalkInPortal() {
       <label className="wp-label">{label}{req && <span className="wp-req"> *</span>}</label>
       {k === "college" ? (
         // College must be SELECTED from the drive's list — no free typing.
-        collegeOptions.length ? (
+        !drive ? (
+          // Test code not verified yet → can't load the list.
+          <select className="wp-input" value="" disabled>
+            <option value="">Verify your test code first to load colleges</option>
+          </select>
+        ) : collegeOptions.length ? (
           <select className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} value={form[k]} onChange={set(k)}>
             <option value="">Select your college…</option>
             {collegeOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         ) : (
-          <select className="wp-input" value="" disabled>
-            <option value="">Verify your test code first to load colleges</option>
-          </select>
+          // Verified but this drive has no college list configured → allow typing (fallback).
+          <input className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} type="text" value={form[k]} onChange={set(k)} placeholder="Enter your college name" />
         )
       ) : type === "select" ? (
         <select className={`wp-input ${fieldErr[k] ? "wp-input--err" : ""}`} value={form[k]} onChange={set(k)}>
