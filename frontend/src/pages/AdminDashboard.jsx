@@ -210,7 +210,7 @@ function SettingsTab({ settings, setSettings, updateSection, handleSaveSettings,
                   </div>
                 </div>
                 <div style={{fontSize:11,color:"var(--text-3)",marginTop:4}}>
-                  Internal key: <code style={{background:"#F1F0FA",padding:"1px 5px",borderRadius:3}}>{sec.name}</code>
+                  Internal key: <code style={{background:"var(--surface-2)",color:"var(--text-2)",padding:"1px 5px",borderRadius:3}}>{sec.name}</code>
                 </div>
               </div>
               <button className="ad-btn ad-btn--sm ad-btn--danger" style={{alignSelf:"flex-start",marginTop:4,flexShrink:0}}
@@ -877,7 +877,7 @@ function UploadModal({ assessment, onClose, onDone }) {
         <h3 className="ad-modal-title">Upload Candidates — {assessment.name}</h3>
         {result ? (
           <div>
-            <div className="ad-empty" style={{background:"#ECFDF5",border:"1px solid #A7F3D0",color:"#065F46",padding:18}}>
+            <div className="ad-note ad-note--success" style={{padding:18,textAlign:"left"}}>
               ✅ {result.addedCount} added · {result.skippedCount} skipped
               {result.skippedCount>0 && <div style={{fontSize:12,marginTop:8,textAlign:"left"}}>
                 {result.skipped.slice(0,8).map((s,i)=><div key={i}>• {s.email||"row"} — {s.reason}</div>)}
@@ -901,7 +901,7 @@ function UploadModal({ assessment, onClose, onDone }) {
                 Send shortlist email immediately
               </label>
             </div>
-            <div className="ad-empty" style={{background:"#EFF6FF",border:"1px solid #BFDBFE",color:"#1E40AF",padding:"12px 14px",textAlign:"left",fontSize:12.5,lineHeight:1.6,marginTop:8}}>
+            <div className="ad-note ad-note--info" style={{padding:"12px 14px",textAlign:"left",fontSize:12.5,lineHeight:1.6,marginTop:8}}>
               📧 The <strong>assessment link</strong> is delivered automatically per this drive's send-time setting
               {assessment.linkSendAt ? <> (≈ {fmtDateTime(assessment.linkSendAt)})</> : null}.
               Link expiry follows the drive's end time.
@@ -933,6 +933,7 @@ function DrivesTab() {
   const [confirmState,setConfirmState]=useState(null); // {title,message,onConfirm}
   const [confirmBusy,setConfirmBusy]=useState(false);
   const [resumeView,setResumeView]=useState(null); // candidate whose resume is open
+  const [profileCand,setProfileCand]=useState(null); // candidate whose profile dialog is open
   const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
@@ -1073,6 +1074,7 @@ function DrivesTab() {
       {confirmState && <ConfirmModal title={confirmState.title} message={confirmState.message}
         onConfirm={runConfirm} onCancel={()=>setConfirmState(null)} loading={confirmBusy} />}
       {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
+      {profileCand && <CandidateProfile candidate={profileCand} onClose={()=>setProfileCand(null)} />}
     </>
   );
 
@@ -1103,34 +1105,42 @@ function DrivesTab() {
       </div>
       {(()=>{ const filtered=drives.filter(d=>driveFilter==="all"?true:driveFilter==="archived"?d.status==="ARCHIVED":d.status!=="ARCHIVED");
         return filtered.length===0 ? <div className="ad-empty">No {driveFilter==="all"?"":driveFilter} drives.</div> :
-        <div className="ad-stats-grid">
-          {filtered.map(d=>(
-            <div key={d._id} className="ad-stat-card" style={{borderTopColor:d.driveType==="WALK_IN"?"#7C3AED":"#1a56db",cursor:"pointer",textAlign:"left",alignItems:"flex-start"}} onClick={()=>openDrive(d)}>
-              <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6,flexWrap:"wrap"}}>
-                <span className="ad-badge" style={{background:(d.driveType==="WALK_IN"?"#7C3AED":"#1a56db")+"22",color:d.driveType==="WALK_IN"?"#7C3AED":"#1a56db"}}>{d.driveType==="WALK_IN"?"WALK-IN":"PRE-REG"}</span>
-                {d.status && d.status!=="ACTIVE" && <span className="ad-badge ad-badge--gray">{d.status}</span>}
+        <div className="ad-drive-grid">
+          {filtered.map(d=>{
+            const isWk=d.driveType==="WALK_IN";
+            const typeC=isWk?"#8B5CF6":"#3B82F6";
+            const stC={ACTIVE:"#10B981",DRAFT:"#64748B",COMPLETED:"#3B82F6",ARCHIVED:"#EF4444"}[d.status]||"#64748B";
+            return (
+            <div key={d._id} className="ad-drive-card" onClick={()=>openDrive(d)}>
+              <span className="ad-drive-accent" style={{background:typeC}} />
+              <div className="ad-drive-head">
+                <span className="ad-badge" style={{background:typeC+"22",color:typeC}}>{isWk?"WALK-IN":"PRE-REG"}</span>
+                <span className="ad-badge" style={{background:stC+"22",color:stC}}>{d.status||"ACTIVE"}</span>
               </div>
-              <div style={{fontSize:15,fontWeight:800,color:"var(--text-1)",marginBottom:6}}>{d.name}</div>
-              {d.driveType==="WALK_IN" && d.testCode && (
-                <div style={{fontSize:13,fontWeight:800,color:"#7C3AED",marginBottom:4,letterSpacing:1}}>Test Code: {d.testCode}
-                  {d.maxCandidates!=null && <span style={{fontWeight:600,color:"var(--text-3)"}}> · {d.walkInCount||0}/{d.maxCandidates}</span>}
+              <div className="ad-drive-name">{d.name}</div>
+              {d.college && <div className="ad-drive-college">🏫 {d.college}</div>}
+              {isWk && d.testCode && (
+                <div className="ad-drive-code">{d.testCode}
+                  {d.maxCandidates!=null && <span className="ad-drive-cap">{d.walkInCount||0}/{d.maxCandidates}</span>}
                 </div>
               )}
-              <div style={{fontSize:12,color:"var(--text-3)"}}>{d.durationMinutes} min · {d.candidateCount} candidates · {d.completedCount} completed</div>
-              <div style={{fontSize:11,color:"var(--text-3)",marginTop:6,lineHeight:1.6}}>
-                {d.startAt ? <>📅 {fmtDate(d.assessmentDate||d.startAt)} · ⏰ {fmtTimeOnly(d.startAt)}–{fmtTimeOnly(d.endAt)}<br/></> : <>Deadline: {fmtDate(d.deadline)}<br/></>}
-                {d.driveType!=="WALK_IN" && d.startAt && <>🔗 Link: {LINK_SEND_OPTIONS.find(o=>o.value===d.linkSendOption)?.label || "—"}</>}
+              <div className="ad-drive-meta">
+                <span>📅 {d.startAt?fmtDate(d.assessmentDate||d.startAt):fmtDate(d.deadline)}</span>
+                {d.startAt && <span>⏰ {fmtTimeOnly(d.startAt)}–{fmtTimeOnly(d.endAt)}</span>}
+                <span>⏱ {d.durationMinutes} min</span>
+                <span>👥 {d.candidateCount} · ✅ {d.completedCount}</span>
+                {d.cutoff!=null && <span style={{color:"#D97706",fontWeight:700}}>🎯 Cutoff {d.cutoff}</span>}
               </div>
-              {d.cutoff!=null && <div style={{fontSize:11,color:"#D97706",marginTop:4,fontWeight:600}}>Cutoff: {d.cutoff}</div>}
-              <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();openDrive(d);}}>View</button>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();setEditDrive(d);}}>Edit</button>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();exportDriveCandidates(d);}}>Export</button>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={e=>{e.stopPropagation();archiveDrive(d);}}>{d.status==="ARCHIVED"?"Unarchive":"Archive"}</button>
-                <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={e=>{e.stopPropagation();delDrive(d);}}>Delete</button>
+              <div className="ad-drive-actions" onClick={e=>e.stopPropagation()}>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>openDrive(d)}>View</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setEditDrive(d)}>Edit</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>exportDriveCandidates(d)}>Export</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>archiveDrive(d)}>{d.status==="ARCHIVED"?"Unarchive":"Archive"}</button>
+                <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>delDrive(d)}>Delete</button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>; })()}
     </div>
   );
@@ -1178,7 +1188,7 @@ function DrivesTab() {
       </div>
 
       {/* Schedule summary */}
-      <div className="ad-empty" style={{textAlign:"left",padding:"12px 16px",marginBottom:16,background:"#F8FAFC",border:"1px solid #E2E8F0",display:"flex",gap:24,flexWrap:"wrap",fontSize:13}}>
+      <div style={{textAlign:"left",padding:"14px 18px",marginBottom:16,background:"var(--surface-2)",border:"1px solid var(--border)",borderRadius:12,color:"var(--text-1)",display:"flex",gap:24,flexWrap:"wrap",fontSize:13}}>
         <span><strong>Date:</strong> {fmtDate(sel.assessmentDate||sel.startAt)}</span>
         <span><strong>Start:</strong> {fmtTimeOnly(sel.startAt)}</span>
         <span><strong>End:</strong> {fmtTimeOnly(sel.endAt)}</span>
@@ -1281,6 +1291,7 @@ function DrivesTab() {
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`} title={violBreakdown(c)}>{c.violations?.total||0}</span>{(c.refreshCount||0)>0&&<span title="Refreshes" style={{fontSize:11,color:"#D97706",marginLeft:4}}>↻{c.refreshCount}</span>}</td>
                 <td style={{display:"flex",gap:4}}>
+                  <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setProfileCand(c)}>View</button>
                   <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button>
                   {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄 CV</button>}
                 </td>
@@ -1380,6 +1391,128 @@ function ResumeViewer({ candidate, onClose }) {
   );
 }
 
+// ── Candidate Profile dialog (tabbed) ──────────────────────────────────────────
+function Field({ label, value }) {
+  return (
+    <div className="ad-pf-field">
+      <span className="ad-pf-k">{label}</span>
+      <span className="ad-pf-v">{value || value === 0 ? value : "—"}</span>
+    </div>
+  );
+}
+function CandidateProfile({ candidate: c, onClose }) {
+  const [tab, setTab] = useState("personal");
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const sm = STATUS_META.find(s => s.key === c.status) || { label: c.status, color: "#64748B" };
+  const pct = (c.score != null && c.totalMarks) ? Math.round(c.score / c.totalMarks * 100) + "%" : "—";
+  const v = c.violations || {};
+  const TABS = [["personal","Personal"],["assessment","Assessment"],["security","Security"],["resume","Resume"]];
+  return (
+    <div className="ad-overlay" onClick={onClose}>
+      <div className="ad-modal ad-modal--wide" onClick={e => e.stopPropagation()}>
+        <div className="ad-modal-head">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="ad-avatar" style={{ width: 44, height: 44, fontSize: 18 }}>{(c.name || "?").charAt(0)}</div>
+            <div>
+              <h3 className="ad-modal-title" style={{ margin: 0 }}>{c.name}</h3>
+              <p className="ad-modal-sub">{c.email} · <span className="ad-badge" style={{ background: sm.color + "22", color: sm.color }}>{sm.label}</span></p>
+            </div>
+          </div>
+          <button className="ad-modal-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="ad-pf-tabs">
+          {TABS.map(([id, label]) => (
+            <button key={id} className={`ad-pf-tab ${tab === id ? "ad-pf-tab--active" : ""}`} onClick={() => setTab(id)}>{label}</button>
+          ))}
+        </div>
+
+        <div className="ad-modal-body">
+          {tab === "personal" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">👤 Personal Information</div>
+              <div className="ad-pf-grid">
+                <Field label="Full Name" value={c.name} />
+                <Field label="USN" value={c.usn} />
+                <Field label="Email" value={c.email} />
+                <Field label="Phone" value={c.phone} />
+                <Field label="Gender" value={c.gender} />
+                <Field label="Date of Birth" value={c.dob} />
+                <Field label="Aadhaar" value={c.aadhaar} />
+                <Field label="College" value={c.college} />
+                <Field label="Course" value={c.course} />
+                <Field label="Branch" value={c.branch} />
+                <Field label="Address" value={c.location} />
+                <Field label="Source" value={c.candidateSource === "WALK_IN" ? "Walk-in" : "Pre-registered"} />
+              </div>
+            </section>
+          )}
+          {tab === "assessment" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">📝 Assessment</div>
+              <div className="ad-pf-grid">
+                {c.drive?.name && <Field label="Drive" value={c.drive.name} />}
+                <Field label="Status" value={sm.label} />
+                <Field label="Score" value={c.score != null ? `${c.score} / ${c.totalMarks}` : "—"} />
+                <Field label="Percentage" value={pct} />
+                <Field label="Result" value={c.passed == null ? "—" : (c.passed ? "Pass" : "Fail")} />
+                <Field label="Started" value={fmtDateTime(c.startedAt)} />
+                <Field label="Completed" value={fmtDateTime(c.completedAt)} />
+                <Field label="Submission" value={c.submissionReason || "—"} />
+              </div>
+            </section>
+          )}
+          {tab === "security" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">🔐 Security & Integrity</div>
+              {c.status === "disqualified" && c.terminationReason &&
+                <div className="ad-note" style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", marginBottom: 12 }}>⛔ Terminated — {c.terminationReason}</div>}
+              <div className="ad-pf-grid">
+                <Field label="Total Violations" value={v.total || 0} />
+                <Field label="Refreshes" value={c.refreshCount || 0} />
+                <Field label="Fullscreen Exits" value={v.fullscreenExits || 0} />
+                <Field label="Tab Switches" value={v.tabSwitches || 0} />
+                <Field label="Focus Loss" value={v.focusLoss || 0} />
+                <Field label="Multiple Faces" value={v.multipleFaces || 0} />
+                <Field label="DevTools" value={v.devtools || 0} />
+                <Field label="Clipboard" value={v.clipboard || 0} />
+                <Field label="Idle" value={v.idle || 0} />
+                <Field label="Window Resize" value={v.windowResize || 0} />
+                <Field label="Camera Disconnect" value={v.cameraDisconnect || 0} />
+                <Field label="Face Hidden" value={v.faceHidden || 0} />
+                <Field label="Location" value={c.geo && c.geo.inside != null ? (c.geo.inside ? "Inside radius" : `Outside (${c.geo.distance}m)`) : "—"} />
+              </div>
+            </section>
+          )}
+          {tab === "resume" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">📄 Resume</div>
+              {c.resume?.filename ? (
+                <>
+                  <div className="ad-pf-grid">
+                    <Field label="File" value={c.resume.filename} />
+                    <Field label="Type" value={(c.resume.ext || "").toUpperCase() || "—"} />
+                    <Field label="Size" value={c.resume.size ? `${(c.resume.size / 1024).toFixed(0)} KB` : "—"} />
+                    <Field label="Uploaded" value={fmtDate(c.resume.uploadedAt)} />
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                    <button className="ad-btn ad-btn--primary ad-btn--sm" onClick={() => setResumeOpen(true)}>👁 Open Resume</button>
+                  </div>
+                </>
+              ) : <div className="ad-empty" style={{ padding: 24 }}>No resume on file.</div>}
+            </section>
+          )}
+        </div>
+
+        <div className="ad-modal-foot">
+          <button className="ad-btn ad-btn--outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      {resumeOpen && <ResumeViewer candidate={c} onClose={() => setResumeOpen(false)} />}
+    </div>
+  );
+}
+
 // ── Global All-Candidates view (across every drive) ────────────────────────────
 function AllCandidatesTab() {
   const [rows,setRows]=useState([]); const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
@@ -1404,6 +1537,7 @@ function AllCandidatesTab() {
   useEffect(()=>{ const iv=setInterval(load,15000); return ()=>clearInterval(iv); },[load]); // auto-refresh
 
   const [resumeView,setResumeView]=useState(null);
+  const [profileCand,setProfileCand]=useState(null);
   const exportAll=async()=>{
     setExporting(true);
     try{
@@ -1434,6 +1568,7 @@ function AllCandidatesTab() {
     <div>
       {toastEl}
       {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
+      {profileCand && <CandidateProfile candidate={profileCand} onClose={()=>setProfileCand(null)} />}
       <div className="ad-section-head">
         <div className="ad-page-title">All Candidates ({pag.total||0})</div>
         <button className="ad-btn ad-btn--export" onClick={exportAll} disabled={exporting}>{exporting?<><Spinner/>Exporting…</>:"⬇ Export Excel"}</button>
@@ -1458,7 +1593,7 @@ function AllCandidatesTab() {
         {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
         :rows.length===0?<div className="ad-empty">No candidates match these filters.</div>
         :<table className="ad-table">
-          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>College</th><th>Source</th><th>Drive</th><th>Status</th><th>Score</th><th>Viol.</th><th>CV</th></tr></thead>
+          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>College</th><th>Source</th><th>Drive</th><th>Status</th><th>Score</th><th>Viol.</th><th>Actions</th></tr></thead>
           <tbody>{rows.map((c,i)=>{
             const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
             const walkIn=c.candidateSource==="WALK_IN";
@@ -1473,7 +1608,10 @@ function AllCandidatesTab() {
                 <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
                 <td><span className={`ad-badge ${(c.violations?.total||0)>=3?"ad-badge--red":(c.violations?.total||0)>0?"ad-badge--amber":"ad-badge--green"}`}>{c.violations?.total||0}</span></td>
-                <td>{c.resume?.filename?<button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄</button>:"—"}</td>
+                <td style={{display:"flex",gap:4}}>
+                  <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setProfileCand(c)}>View</button>
+                  {c.resume?.filename&&<button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄</button>}
+                </td>
               </tr>
             );
           })}</tbody>
@@ -1746,21 +1884,24 @@ function Dashboard({ onLogout }) {
             {!overview && <div className="ad-loading"><Spinner dark/>Loading overview…</div>}
             {overview && (
               <>
-                <div className="ad-stats-grid">
+                <div className="ad-kpi-grid">
                   {[
-                    {label:"Total Drives",            val:overview.drives.total,            icon:"🎓",color:"#4F46E5"},
-                    {label:"Active Drives",           val:overview.drives.active,           icon:"🟢",color:"#059669"},
-                    {label:"Archived Drives",         val:overview.drives.archived,         icon:"🗄️",color:"#64748B"},
-                    {label:"Total Candidates",        val:overview.candidates.total,        icon:"👥",color:"#0891B2"},
-                    {label:"Walk-In Candidates",      val:overview.candidates.walkIn,       icon:"🚶",color:"#7C3AED"},
-                    {label:"Pre-Registered",          val:overview.candidates.preRegistered,icon:"✉️",color:"#1a56db"},
-                    {label:"Selected (≥ cutoff)",     val:overview.candidates.selected,     icon:"🏆",color:"#D97706"},
-                    {label:"Avg Score",               val:overview.candidates.avgScore,     icon:"📈",color:"#0EA5E9"},
+                    {label:"Total Drives",            val:overview.drives.total,            icon:"🎓",color:"#6366F1",sub:`${overview.drives.active} active`},
+                    {label:"Active Drives",           val:overview.drives.active,           icon:"🟢",color:"#10B981",sub:"running now"},
+                    {label:"Archived Drives",         val:overview.drives.archived,         icon:"🗄️",color:"#64748B",sub:"closed"},
+                    {label:"Total Candidates",        val:overview.candidates.total,        icon:"👥",color:"#06B6D4",sub:"all drives"},
+                    {label:"Walk-In Candidates",      val:overview.candidates.walkIn,       icon:"🚶",color:"#8B5CF6",sub:"test-code"},
+                    {label:"Pre-Registered",          val:overview.candidates.preRegistered,icon:"✉️",color:"#3B82F6",sub:"invited"},
+                    {label:"Selected (≥ cutoff)",     val:overview.candidates.selected,     icon:"🏆",color:"#F59E0B",sub:"above cutoff"},
+                    {label:"Avg Score",               val:overview.candidates.avgScore,     icon:"📈",color:"#0EA5E9",sub:"mean result"},
                   ].map(s=>(
-                    <div key={s.label} className="ad-stat-card" style={{borderTopColor:s.color}}>
-                      <div className="ad-stat-icon">{s.icon}</div>
-                      <div className="ad-stat-val" style={{color:s.color}}>{s.val}</div>
-                      <div className="ad-stat-lbl">{s.label}</div>
+                    <div key={s.label} className="ad-kpi" style={{"--kpi":s.color}}>
+                      <div className="ad-kpi-icon">{s.icon}</div>
+                      <div className="ad-kpi-body">
+                        <div className="ad-kpi-label">{s.label}</div>
+                        <div className="ad-kpi-val">{s.val}</div>
+                        <div className="ad-kpi-sub">{s.sub}</div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1975,7 +2116,7 @@ function Dashboard({ onLogout }) {
                   </div>
                   <div className="ad-field" style={{flex:1,minWidth:120}}>
                     <label className="ad-label">Internal Key</label>
-                    <input className="ad-input" value={sec.name} readOnly style={{background:"#F1F0FA",color:"#9490C0",cursor:"not-allowed"}}/>
+                    <input className="ad-input" value={sec.name} readOnly style={{background:"var(--surface-2)",color:"var(--text-3)",cursor:"not-allowed"}}/>
                   </div>
                   <div className="ad-field" style={{width:120}}>
                     <label className="ad-label">No. of Questions</label>
