@@ -1007,7 +1007,7 @@ export default function AssessmentPage() {
               <span className="asmt-rules-icon">⚠️</span>
               <div>
                 <h1 className="asmt-rules-title">Assessment Instructions &amp; Rules</h1>
-                <p className="asmt-rules-sub">{info?.assessmentName} · {info?.durationMinutes} minutes</p>
+                <p className="asmt-rules-sub">M H FOUNDATION · {info?.durationMinutes} minutes</p>
               </div>
             </div>
             <ul className="asmt-rules-list">
