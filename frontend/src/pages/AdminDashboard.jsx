@@ -661,68 +661,93 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
 
   return (
     <div className="ad-overlay" onClick={onClose}>
-      <div className="ad-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:560,maxHeight:"88vh",overflowY:"auto"}}>
-        <h3 className="ad-modal-title">New Campus Drive</h3>
-        <div className="ad-field"><label className="ad-label">Drive / Assessment Name</label>
-          <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
-        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <div className="ad-field" style={{flex:1,minWidth:160}}><label className="ad-label">Drive Type</label>
-            <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
-              <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
-              <option value="WALK_IN">Walk-In (test code at /test)</option>
-            </select></div>
-          {driveType==="WALK_IN" && (
-            <div className="ad-field" style={{width:170}}><label className="ad-label">Max Candidates</label>
-              <input type="number" className="ad-input" value={maxCandidates} min={1} placeholder="e.g. 100" onChange={e=>setMaxCandidates(e.target.value)}/>
-              <span className="ad-hint">A unique test code is generated on save.</span></div>
-          )}
-        </div>
-        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Duration (min)</label>
-            <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
-          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Passing Score (internal)</label>
-            <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
-        </div>
-        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <div className="ad-field" style={{flex:1,minWidth:140}}><label className="ad-label">Assessment Date</label>
-            <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
-          <div className="ad-field" style={{width:120}}><label className="ad-label">Start Time</label>
-            <input type="time" className="ad-input" value={startTime} onChange={e=>setStartTime(e.target.value)}/></div>
-          <div className="ad-field" style={{width:120}}><label className="ad-label">End Time</label>
-            <input type="time" className="ad-input" value={endTime} onChange={e=>setEndTime(e.target.value)}/></div>
-        </div>
-        {driveType==="WALK_IN"
-          ? <div className="ad-empty" style={{marginTop:10,textAlign:"left",background:"#F5F3FF",border:"1px solid #DDD6FE",color:"#6D28D9",padding:"10px 14px",fontSize:12.5}}>
-              🚶 Walk-in drive — no email links. Share the <strong>/test</strong> portal link; students self-register with the test code. Registration opens before the start time; the assessment begins at the start time.
-            </div>
-          : <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Assessment Link Send Time</label>
-          <select className="ad-input ad-select" value={linkSendOption} onChange={e=>setLinkSendOption(e.target.value)}>
-            {LINK_SEND_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          {linkSendOption==="custom"
-            ? <input type="datetime-local" className="ad-input" style={{marginTop:8}} value={linkSendCustom} onChange={e=>setLinkSendCustom(e.target.value)}/>
-            : <span className="ad-hint">Shortlist email sends immediately on upload. The assessment link sends {linkSendOption==="immediately"?"immediately":`${LINK_SEND_OPTIONS.find(o=>o.value===linkSendOption)?.label.toLowerCase()}`}.</span>}
-        </div>}
-        <div className="ad-field" style={{marginTop:10}}><label className="ad-label">Sections (drawn from the shared question pool)</label>
-          <div className="ad-sec-pick-list">
-            {secs.map((s,i)=>(
-              <div key={s.name} className={`ad-sec-pick ${s.include?"ad-sec-pick--on":""}`}>
-                <input type="checkbox" checked={s.include} aria-label={`Include ${s.displayName}`}
-                  onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
-                <span className="ad-sec-pick-name">{s.displayName}</span>
-                <input type="number" className="ad-input ad-sec-pick-count" value={s.questionCount} min={1} aria-label={`Question count for ${s.displayName}`}
-                  onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
-                <span className="ad-sec-pick-qs">Qs</span>
-              </div>
-            ))}
-            {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
+      <div className="ad-modal ad-modal--wide" onClick={e=>e.stopPropagation()}>
+        <div className="ad-modal-head">
+          <div>
+            <h3 className="ad-modal-title">New Campus Drive</h3>
+            <p className="ad-modal-sub">Configure the assessment details, schedule, questions and security.</p>
           </div>
+          <button className="ad-modal-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
-        {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
-        <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
-          <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?<><Spinner/>Creating…</>:"Create Drive"}</button>
+
+        <div className="ad-modal-body">
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">📋 Basic Information</div>
+            <div className="ad-field"><label className="ad-label">Drive / Assessment Name</label>
+              <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">Drive Type</label>
+                <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
+                  <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
+                  <option value="WALK_IN">Walk-In (test code at /test)</option>
+                </select></div>
+              {driveType==="WALK_IN" && (
+                <div className="ad-field"><label className="ad-label">Max Candidates</label>
+                  <input type="number" className="ad-input" value={maxCandidates} min={1} placeholder="e.g. 100" onChange={e=>setMaxCandidates(e.target.value)}/>
+                  <span className="ad-hint">A unique test code is generated on save.</span></div>
+              )}
+            </div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">Duration (minutes)</label>
+                <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
+              <div className="ad-field"><label className="ad-label">Passing Score (internal)</label>
+                <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
+            </div>
+          </section>
+
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">🗓️ Assessment Schedule</div>
+            <div className="ad-grid-3">
+              <div className="ad-field"><label className="ad-label">Assessment Date</label>
+                <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
+              <div className="ad-field"><label className="ad-label">Start Time</label>
+                <input type="time" className="ad-input" value={startTime} onChange={e=>setStartTime(e.target.value)}/></div>
+              <div className="ad-field"><label className="ad-label">End Time</label>
+                <input type="time" className="ad-input" value={endTime} onChange={e=>setEndTime(e.target.value)}/></div>
+            </div>
+            {driveType==="WALK_IN"
+              ? <div className="ad-note ad-note--purple" style={{marginTop:12}}>
+                  🚶 Walk-in drive — no email links. Share the <strong>/test</strong> portal link; students self-register with the test code. Registration opens before the start time; the assessment begins at the start time.
+                </div>
+              : <div className="ad-field" style={{marginTop:12}}><label className="ad-label">Assessment Link Send Time</label>
+                  <select className="ad-input ad-select" value={linkSendOption} onChange={e=>setLinkSendOption(e.target.value)}>
+                    {LINK_SEND_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  {linkSendOption==="custom"
+                    ? <input type="datetime-local" className="ad-input" style={{marginTop:8}} value={linkSendCustom} onChange={e=>setLinkSendCustom(e.target.value)}/>
+                    : <span className="ad-hint">Shortlist email sends immediately on upload. The assessment link sends {linkSendOption==="immediately"?"immediately":`${LINK_SEND_OPTIONS.find(o=>o.value===linkSendOption)?.label.toLowerCase()}`}.</span>}
+                </div>}
+          </section>
+
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">❓ Question Configuration</div>
+            <span className="ad-hint" style={{display:"block",marginBottom:6}}>Sections are drawn from the shared question pool. Tick the sections to include and set the question count.</span>
+            <div className="ad-sec-pick-list">
+              {secs.map((s,i)=>(
+                <div key={s.name} className={`ad-sec-pick ${s.include?"ad-sec-pick--on":""}`}>
+                  <input type="checkbox" checked={s.include} aria-label={`Include ${s.displayName}`}
+                    onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
+                  <span className="ad-sec-pick-name">{s.displayName}</span>
+                  <input type="number" className="ad-input ad-sec-pick-count" value={s.questionCount} min={1} aria-label={`Question count for ${s.displayName}`}
+                    onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
+                  <span className="ad-sec-pick-qs">Qs</span>
+                </div>
+              ))}
+              {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
+            </div>
+          </section>
+
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">🔒 Security Configuration</div>
+            <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
+          </section>
+
+          {err && <p className="ad-form-err" style={{margin:"4px 2px 0"}}>{err}</p>}
+        </div>
+
+        <div className="ad-modal-foot">
+          <button className="ad-btn ad-btn--outline" onClick={onClose}>Cancel</button>
+          <button className="ad-btn ad-btn--primary" onClick={save} disabled={saving}>{saving?<><Spinner/>Creating…</>:"Create Drive"}</button>
         </div>
       </div>
     </div>
@@ -756,33 +781,51 @@ function EditDriveModal({ drive, onClose, onSaved }) {
 
   return (
     <div className="ad-overlay" onClick={onClose}>
-      <div className="ad-modal" onClick={e=>e.stopPropagation()} style={{maxWidth:560,maxHeight:"88vh",overflowY:"auto"}}>
-        <h3 className="ad-modal-title">Edit Drive {drive.testCode?`· ${drive.testCode}`:""}</h3>
-        <div className="ad-field"><label className="ad-label">Drive Name</label>
-          <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}}/></div>
-        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Status</label>
-            <select className="ad-input ad-select" value={status} onChange={e=>setStatus(e.target.value)}>
-              {["DRAFT","ACTIVE","COMPLETED","ARCHIVED"].map(s=><option key={s} value={s}>{s}</option>)}
-            </select></div>
-          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Duration (min)</label>
-            <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
+      <div className="ad-modal ad-modal--wide" onClick={e=>e.stopPropagation()}>
+        <div className="ad-modal-head">
+          <div>
+            <h3 className="ad-modal-title">Edit Drive {drive.testCode?`· ${drive.testCode}`:""}</h3>
+            <p className="ad-modal-sub">Update the schedule, capacity, cutoff and security configuration.</p>
+          </div>
+          <button className="ad-modal-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-          <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Cutoff (selection)</label>
-            <input type="number" className="ad-input" value={cutoff} min={0} placeholder="e.g. 30" onChange={e=>setCutoff(e.target.value)}/>
-            <span className="ad-hint">Candidates scoring ≥ cutoff count as Selected (recalculated live).</span></div>
-          {drive.driveType==="WALK_IN" && (
-            <div className="ad-field" style={{flex:1,minWidth:120}}><label className="ad-label">Max Candidates</label>
-              <input type="number" className="ad-input" value={maxCandidates} min={1} onChange={e=>setMaxCandidates(e.target.value)}/>
-              <span className="ad-hint">{drive.walkInCount||0} registered so far.</span></div>
-          )}
+
+        <div className="ad-modal-body">
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">📋 Basic Information</div>
+            <div className="ad-field"><label className="ad-label">Drive Name</label>
+              <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}}/></div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">Status</label>
+                <select className="ad-input ad-select" value={status} onChange={e=>setStatus(e.target.value)}>
+                  {["DRAFT","ACTIVE","COMPLETED","ARCHIVED"].map(s=><option key={s} value={s}>{s}</option>)}
+                </select></div>
+              <div className="ad-field"><label className="ad-label">Duration (minutes)</label>
+                <input type="number" className="ad-input" value={duration} min={1} onChange={e=>setDuration(e.target.value)}/></div>
+            </div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">Cutoff (selection)</label>
+                <input type="number" className="ad-input" value={cutoff} min={0} placeholder="e.g. 30" onChange={e=>setCutoff(e.target.value)}/>
+                <span className="ad-hint">Candidates scoring ≥ cutoff count as Selected (recalculated live).</span></div>
+              {drive.driveType==="WALK_IN" && (
+                <div className="ad-field"><label className="ad-label">Max Candidates</label>
+                  <input type="number" className="ad-input" value={maxCandidates} min={1} onChange={e=>setMaxCandidates(e.target.value)}/>
+                  <span className="ad-hint">{drive.walkInCount||0} registered so far.</span></div>
+              )}
+            </div>
+          </section>
+
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">🔒 Security Configuration</div>
+            <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
+          </section>
+
+          {err && <p className="ad-form-err" style={{margin:"4px 2px 0"}}>{err}</p>}
         </div>
-        <SecurityToggles value={security} onChange={setSecurity} config={secConfig} onConfigChange={setSecConfig}/>
-        {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
-        <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onClose}>Cancel</button>
-          <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>{saving?<><Spinner/>Saving…</>:"Save Changes"}</button>
+
+        <div className="ad-modal-foot">
+          <button className="ad-btn ad-btn--outline" onClick={onClose}>Cancel</button>
+          <button className="ad-btn ad-btn--primary" onClick={save} disabled={saving}>{saving?<><Spinner/>Saving…</>:"Save Changes"}</button>
         </div>
       </div>
     </div>
@@ -1488,18 +1531,28 @@ function ActiveModeBanner() {
 
   return (
     <>
-      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"8px 14px",borderRadius:10,marginBottom:12,
-        background:active?"#ecfdf5":"#f1f5f9",border:`1px solid ${active?"#a7f3d0":"#e2e8f0"}`}}>
-        <span style={{fontWeight:800,fontSize:13,color:active?"#065f46":"#475569"}}>
-          {active?"🟢 Assessment Mode Active — Backend Keep-Alive Running":"⚪ Assessment Mode Disabled — Backend May Sleep"}
-        </span>
-        {active && st && <span style={{fontSize:11.5,color:"#475569"}}>
-          Last ping {fmt(st.lastHeartbeat)} · Auto-off {fmt(st.autoOffAt)} · {st.memoryMB}MB
-        </span>}
-        <button className={`ad-btn ad-btn--sm ${active?"ad-btn--danger":"ad-btn--primary"}`} style={{marginLeft:"auto"}}
-          disabled={busy} onClick={()=>toggle({on:!active})}>
-          {busy?"…":active?"Turn Off":"Turn On Active Mode"}
-        </button>
+      <div className={`ad-status-widget ${active?"ad-status-widget--on":""}`}>
+        <div className="ad-status-main">
+          <span className={`ad-status-dot ${active?"ad-status-dot--on":""}`} />
+          <div>
+            <div className="ad-status-title">{active?"Assessment Mode Active":"Assessment Mode Disabled"}</div>
+            <div className="ad-status-sub">{active?"Backend keep-alive is running":"Backend may sleep between assessments"}</div>
+          </div>
+        </div>
+        {active && st && (
+          <div className="ad-status-metrics">
+            <div><span className="ad-status-k">Heartbeat</span><span className="ad-status-v">🟢 Active</span></div>
+            <div><span className="ad-status-k">Last Ping</span><span className="ad-status-v">{fmt(st.lastHeartbeat)}</span></div>
+            <div><span className="ad-status-k">Memory</span><span className="ad-status-v">{st.memoryMB} MB</span></div>
+            <div><span className="ad-status-k">Auto Shutdown</span><span className="ad-status-v">{fmt(st.autoOffAt)}</span></div>
+          </div>
+        )}
+        <div className="ad-status-actions">
+          {active && <button className="ad-btn ad-btn--sm ad-btn--outline" disabled={busy} onClick={()=>toggle({extend:true})}>Extend 2h</button>}
+          <button className={`ad-btn ad-btn--sm ${active?"ad-btn--danger":"ad-btn--primary"}`} disabled={busy} onClick={()=>toggle({on:!active})}>
+            {busy?"…":active?"Disable":"Enable"}
+          </button>
+        </div>
       </div>
       {warn && (
         <div className="ad-overlay">
@@ -1713,18 +1766,27 @@ function Dashboard({ onLogout }) {
                 </div>
 
                 <div className="ad-page-title" style={{marginTop:24,fontSize:16}}>Recent Activity</div>
-                <div className="ad-table-wrap">
+                <div className="ad-table-wrap" style={{padding:overview.recentActivity?.length?"6px 4px":0}}>
                   {(!overview.recentActivity||!overview.recentActivity.length)
                     ? <div className="ad-empty">No recent activity.</div>
-                    : <div style={{display:"flex",flexDirection:"column"}}>
-                        {overview.recentActivity.map((a,i)=>(
-                          <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"10px 14px",borderBottom:"1px solid var(--line,#eee)"}}>
-                            <span>{a.type==="completed"?"✅":a.type==="disqualified"?"🚫":a.type==="drive"?"🎓":"📝"}</span>
-                            <span style={{flex:1,fontSize:13,color:"var(--text-1)"}}>{a.text}</span>
-                            {a.source && <span className="ad-badge ad-badge--gray">{a.source==="WALK_IN"?"Walk-in":a.source==="PRE_REGISTERED"?"Pre-reg":a.source}</span>}
-                            <span style={{fontSize:11,color:"var(--text-3)"}}>{fmtDateTime(a.at)}</span>
-                          </div>
-                        ))}
+                    : <div className="ad-timeline">
+                        {overview.recentActivity.map((a,i)=>{
+                          const m = a.type==="completed"?{icon:"✅",c:"#059669"}
+                            :a.type==="disqualified"?{icon:"⛔",c:"#DC2626"}
+                            :a.type==="drive"?{icon:"🎓",c:"#1a56db"}
+                            :{icon:"📝",c:"#7C3AED"};
+                          return (
+                            <div key={i} className="ad-tl-item">
+                              <div className="ad-tl-dot" style={{background:m.c+"22",color:m.c,borderColor:m.c+"55"}}>{m.icon}</div>
+                              <div className="ad-tl-body">
+                                <div className="ad-tl-text">{a.text}
+                                  {a.source && <span className="ad-badge ad-badge--gray" style={{marginLeft:8}}>{a.source==="WALK_IN"?"Walk-in":a.source==="PRE_REGISTERED"?"Pre-reg":a.source}</span>}
+                                </div>
+                                <div className="ad-tl-time">{fmtDateTime(a.at)}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>}
                 </div>
               </>
