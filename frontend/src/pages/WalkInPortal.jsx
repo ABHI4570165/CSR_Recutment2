@@ -52,7 +52,11 @@ export default function WalkInPortal() {
   }, [form]);
 
   const set = (k) => (e) => {
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+    let val = e.target.value;
+    // Hard-restrict numeric fields at entry time: digits only, exact max length.
+    if (k === "phone")   val = val.replace(/\D/g, "").slice(0, 10);
+    if (k === "aadhaar") val = val.replace(/\D/g, "").slice(0, 12);
+    setForm((f) => ({ ...f, [k]: val }));
     setErr(""); setFieldErr((fe) => ({ ...fe, [k]: "" }));
     if (k === "testCode") { setDrive(null); setCodeMsg(""); }
   };
@@ -152,7 +156,8 @@ export default function WalkInPortal() {
           onChange={set(k)} onBlur={k === "testCode" ? checkCode : undefined}
           max={type === "date" ? new Date().toISOString().slice(0, 10) : undefined}
           inputMode={k === "phone" || k === "aadhaar" ? "numeric" : undefined}
-          placeholder={k === "testCode" ? "e.g. MH001" : ""} />
+          maxLength={k === "phone" ? 10 : k === "aadhaar" ? 12 : undefined}
+          placeholder={k === "phone" ? "10-digit mobile number" : k === "aadhaar" ? "12-digit Aadhaar number" : k === "testCode" ? "e.g. MH001" : ""} />
       )}
       {fieldErr[k] && <span className="wp-field-err">{fieldErr[k]}</span>}
     </div>
