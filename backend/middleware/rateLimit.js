@@ -1,5 +1,9 @@
 const rateLimit = require("express-rate-limit");
 
+// TEST_MODE: skip per-IP limits during load testing (a single load generator shares
+// one IP, which real candidates do not). Reverted by unsetting TEST_MODE. Test-only.
+const skipInTest = (req) => process.env.TEST_MODE === "true" || req.path === "/api/health";
+
 // General API rate limiter
 const apiLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
@@ -36,6 +40,7 @@ const candidateLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.params?.token || req.ip,
   message: { success: false, message: "Too many requests. Please slow down." },
+  skip: skipInTest,
 });
 
 // Walk-in portal — generous per-IP cap. Campus labs share a NAT IP and many
@@ -47,6 +52,7 @@ const walkinLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: "Too many requests from this network. Please wait a moment and retry." },
+  skip: skipInTest,
 });
 
 module.exports = { apiLimiter, authLimiter, submitLimiter, candidateLimiter, walkinLimiter };

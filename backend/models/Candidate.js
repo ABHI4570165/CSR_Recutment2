@@ -140,6 +140,9 @@ const candidateSchema = new mongoose.Schema({
   // Anti-malpractice
   violations: { type: violationsSchema, default: () => ({}) },
 
+  // Load-test marker (Phase 4 TEST_MODE) — lets cleanup delete ONLY test data.
+  isTestCandidate:   { type: Boolean, default: false, index: true },
+
   // V3.1 forensics
   refreshCount:      { type: Number, default: 0 },        // browser refreshes during the attempt
   terminationReason: { type: String, default: undefined },// human-readable cause of auto-termination

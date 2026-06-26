@@ -1,46 +1,65 @@
 import axios from "axios";
 
-// ── Resolve backend base URL ──────────────────────────────────────────────────
+// ── Resolve backend base URL (with optional client-side load balancing) ────────
 //
-//  LOCAL DEV  → VITE_API_URL is NOT set → vite.config.js proxy forwards /api
-//               to localhost:5000, so BASE = "/api"
+//  LOCAL DEV  → no env set → vite proxy forwards /api to localhost (BASE = "/api")
 //
-//  PRODUCTION → VITE_API_URL MUST be set in .env.production (Vercel/Hostinger)
-//               before running `npm run build`
-//               e.g. VITE_API_URL=https://mha-quiz-api.onrender.com
+//  PRODUCTION → set ONE of these in .env.production before `npm run build`:
+//    VITE_API_URL  = https://api-1.onrender.com                 (single backend)
+//    VITE_API_URLS = https://a.onrender.com,https://b.onrender.com,https://c... (load-balanced)
 //
-const rawUrl = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, ""); // strip trailing slash
-const BASE   = rawUrl ? `${rawUrl}/api` : "/api";
+//  When VITE_API_URLS lists several backends, each browser RANDOMLY picks one and
+//  sticks to it for the session (stored in sessionStorage). This spreads load
+//  across the backends. REQUIREMENT: every backend must share the SAME MongoDB,
+//  Cloudinary, Brevo and JWT secrets — otherwise data/login break across instances.
+//
+// Build the backend list (each entry already includes /api). One or many.
+const BACKENDS = (import.meta.env.VITE_API_URLS || import.meta.env.VITE_API_URL || "")
+  .split(",").map((s) => s.trim().replace(/\/+$/, "")).filter(Boolean).map((u) => `${u}/api`);
 
-// Log in dev so you can immediately see if the URL is wrong
-if (import.meta.env.DEV) {
-  console.log(`[api] BASE URL: ${BASE}`);
+const IDX_KEY = "mh_api_idx";
+function getIdx() {
+  if (BACKENDS.length <= 1) return 0;
+  let i;
+  try { i = parseInt(sessionStorage.getItem(IDX_KEY), 10); } catch { /* ignore */ }
+  if (isNaN(i) || i < 0 || i >= BACKENDS.length) {
+    i = Math.floor(Math.random() * BACKENDS.length);     // sticky random pick per session
+    try { sessionStorage.setItem(IDX_KEY, String(i)); } catch { /* ignore */ }
+  }
+  return i;
 }
+function rotateIdx() {                                    // failover: move to the next backend
+  if (BACKENDS.length <= 1) return 0;
+  const i = (getIdx() + 1) % BACKENDS.length;
+  try { sessionStorage.setItem(IDX_KEY, String(i)); } catch { /* ignore */ }
+  return i;
+}
+function currentBase() { return BACKENDS.length ? BACKENDS[getIdx()] : "/api"; } // "/api" = dev proxy
+const BASE = currentBase(); // for logging / any direct use
 
-// ── Axios instances ───────────────────────────────────────────────────────────
-const api = axios.create({
-  baseURL: BASE,
-  timeout: 30000,
-  headers: { "Content-Type": "application/json" },  // explicit — prevents missing header bugs
-});
+if (import.meta.env.DEV) console.log(`[api] backends: ${BACKENDS.length || "(dev proxy)"} · base: ${BASE}`);
 
-const adminApi = axios.create({
-  baseURL: BASE,
-  timeout: 30000,
-  headers: { "Content-Type": "application/json" },
-});
+// ── Axios instances (baseURL is set per-request so failover can switch backends) ─
+const mkInstance = () => axios.create({ timeout: 30000, headers: { "Content-Type": "application/json" } });
+const api = mkInstance();
+const adminApi = mkInstance();
+const candApi = mkInstance();
 
-// Attach student JWT to every request
+// Request interceptors: point at the current backend + attach the right auth token.
 api.interceptors.request.use((cfg) => {
+  if (!cfg.baseURL) cfg.baseURL = currentBase();
   const token = localStorage.getItem("quizToken");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
-
-// Attach admin JWT to every request
 adminApi.interceptors.request.use((cfg) => {
+  if (!cfg.baseURL) cfg.baseURL = currentBase();
   const token = sessionStorage.getItem("adminToken");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+candApi.interceptors.request.use((cfg) => {
+  if (!cfg.baseURL) cfg.baseURL = currentBase();
   return cfg;
 });
 
@@ -84,8 +103,29 @@ const handleErr = (err) => {
   throw e;
 };
 
-api.interceptors.response.use((r) => r, handleErr);
-adminApi.interceptors.response.use((r) => r, handleErr);
+// Automatic failover: if the chosen backend is unreachable / times out / 5xx,
+// rotate to the next backend and retry the SAME request — up to once per backend.
+// This means a cold or crashed Render instance won't strand its students.
+function withFailover(instance) {
+  return async (err) => {
+    const cfg = err.config;
+    const retryable = cfg && (!err.response || err.code === "ECONNABORTED" ||
+      (err.response.status >= 500 && err.response.status <= 599));
+    if (retryable && BACKENDS.length > 1) {
+      cfg.__lbTries = (cfg.__lbTries || 0) + 1;
+      if (cfg.__lbTries < BACKENDS.length) {
+        rotateIdx();
+        cfg.baseURL = currentBase();
+        if (import.meta.env.DEV) console.warn(`[api] failover → ${cfg.baseURL} (try ${cfg.__lbTries})`);
+        return instance(cfg);
+      }
+    }
+    return handleErr(err);
+  };
+}
+api.interceptors.response.use((r) => r, withFailover(api));
+adminApi.interceptors.response.use((r) => r, withFailover(adminApi));
+candApi.interceptors.response.use((r) => r, withFailover(candApi));
 
 // ── Student APIs ──────────────────────────────────────────────────────────────
 // Fields sent: { name, email, college, rollNo, phone }
@@ -109,7 +149,7 @@ export const autoSave      = (d) => api.post("/quiz/auto-save", d);
 export const submitQuiz    = (d) => api.post("/quiz/submit", d);
 
 // ── Admin APIs ────────────────────────────────────────────────────────────────
-export const adminLogin      = (d)    => axios.post(`${BASE}/auth/admin/login`, d, { headers: { "Content-Type": "application/json" } });
+export const adminLogin      = (d)    => adminApi.post("/auth/admin/login", d);
 export const clearAdminToken = ()     => sessionStorage.removeItem("adminToken");
 export const fetchStats      = ()     => adminApi.get("/admin/stats");
 export const fetchUsers      = (p)    => adminApi.get("/admin/users",    { params: p });
@@ -152,9 +192,7 @@ export const downloadResume       = (id)    => adminApi.get(`/assessments/candid
 export const downloadResumeFile   = (id)    => adminApi.get(`/assessments/candidates/${id}/resume?download=1`, { responseType: "blob" });
 
 // ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────
-// No auth header — the opaque token IS the credential.
-const candApi = axios.create({ baseURL: BASE, timeout: 30000, headers: { "Content-Type": "application/json" } });
-candApi.interceptors.response.use((r) => r, handleErr);
+// No auth header — the opaque token IS the credential. (candApi defined above, with failover.)
 export const getCandidate    = (token)    => candApi.get(`/candidate/${token}`);
 export const startCandidate  = (token, d) => candApi.post(`/candidate/${token}/start`, d || {});
 export const saveCandidate   = (token, d) => candApi.post(`/candidate/${token}/save`, d);

@@ -148,6 +148,12 @@ async function verifyTransport() {
 
 // Generic send. Throws on failure so the queue can record + retry.
 async function sendMail({ to, subject, html, text, attachments }) {
+  // TEST_MODE: bypass ALL outgoing email during load testing. Code is untouched;
+  // unset TEST_MODE to restore normal sending. (Phase 4 temporary test mode.)
+  if (process.env.TEST_MODE === "true") {
+    console.log(`[email] TEST_MODE — skipped send to ${to} ("${subject}")`);
+    return "test-mode-skipped";
+  }
   const api = usingApi();
   console.log(`[email] STEP 6 sending → to=${to} subject="${subject}" via=${api ? "Brevo-API(HTTPS)" : `SMTP ${process.env.EMAIL_HOST}:${process.env.EMAIL_PORT || 587}`}`);
   try {

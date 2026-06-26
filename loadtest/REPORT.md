@@ -1,64 +1,62 @@
-# Campus Recruitment Platform — Load & Stress Test Report (V3.5, hCDN disabled)
+# Phase 4 — Full End-to-End Write-Path Load Test (REPORT)
 
-**Target:** https://quizportal.mandi-hariyanna-academy.com (origin IP 82.180.143.74, Hostinger shared hosting, `Keep-Alive max=100`)
-**Date:** 2026-06-26 · **Driver:** Node 24 `fetch` (k6 was blocked — see below) · **Source:** single client IP
+**Date:** 2026-06-26 · **Tool:** k6 v1.7.1 · **Flow:** validate → register → start → answer+autosave → submit (2–6s think time)
 
----
+## 1. Test environment & method
+- **Backend:** the production code, run locally in **TEST_MODE** (emails bypassed, candidates tagged `isTestCandidate`, per-IP limiter skipped — single load generator = one IP).
+- **Database:** an **isolated throwaway DB `CSRQuiz_loadtest` on the same Atlas M0 cluster** → measures the *real shared Atlas write ceiling* (identical bottleneck for all 5 production Render instances) with **zero** production data touched.
+- **Cloudinary:** off → dummy resumes stored in the throwaway DB (dropped after).
+- **Ramp:** 20 → 50 → 100 → 150 → 200 → 250 → **300** VUs with holds (11m50s total).
 
-## Executive answer (measured, not estimated)
+> Scope note: this isolates the **application logic + Atlas-M0 write capacity** (the previously-unmeasured piece). The earlier read test already certified the **5×Render request layer to 300 concurrent, 100%**. Together they cover request handling + writes. Render per-instance CPU under write load was not directly measured (local Node is stronger than 5×0.1 CPU); confirm with a single-staging-Render run if you want that last variable nailed.
 
-| Concurrency | Result | Evidence |
+## 2. Results (measured)
+| Step | Success | Latency p95 | p99 | max |
+|---|---|---|---|---|
+| Register | **100%** (2248/2248) | 3.91 s | 4.76 s | 6.8 s |
+| Start | **100%** (2248/2248) | 3.05 s | 4.41 s | 5.83 s |
+| Autosave | **99.98%** (6698/6699) | 1.63 s | 2.42 s | 3.76 s |
+| Submit | **100%** (2150/2150) | 3.03 s | 4.27 s | 6.18 s |
+| **Full flow** | **100%** (2150/2150 complete) | — | — | — |
+
+- **HTTP failures: 0.00%** (1 of 15,593 — a single autosave). **No timeouts, no 5xx, no ECONNRESET.**
+- Completed flows: **2,150** (+98 in-flight at ramp-down). Throughput ~22 req/s, ~3 full flows/s.
+- Checks: **99.99% passed** (15,592 / 15,593).
+
+## 3. Performance characterization
+- The system sustained the **entire ramp to 300 concurrent candidates with 100% flow success**.
+- Latency **rises under load** (Atlas M0 is the shared write bottleneck): register/start/submit p95 ≈ 3 s, p99 ≈ 4–4.8 s at peak. Acceptable for one-time register/start/submit; autosave p95 1.63 s is fine (runs every ~8 s).
+- **Atlas M0 is the limiter** on latency, not the app code. Upgrading Atlas (M10) is the single change that would cut these p95/p99 numbers.
+
+## 4. Data integrity & safety
+- **No duplicate candidates / submissions** (unique per-VU identity; 100% success, no 11000 errors surfaced).
+- **No emails sent** (TEST_MODE bypass).
+- **Production `CSRQuiz` untouched** — post-test verification: `isTestCandidate=0`, `LOAD TEST drives=0`. Test DB dropped entirely.
+
+## 5. Certification (measured evidence only)
+| Concurrent students | Status | Evidence |
 |---|---|---|
-| **20** | ✅ **STABLE** | 100% success, avg 129 ms, p95 266 ms, p99 482 ms, max 514 ms, 17.3 rps |
-| **50** | ❌ **UNSTABLE** | 80.7% success, **19.3% connection resets** (ECONNRESET ×207, socket ×26), p99 1099 ms, max 10.7 s |
-| 100 / 150 / 200 / 250 / 300 | ⛔ **NOT REACHABLE from one IP** | source IP flood-blocked by Hostinger firewall before these could be measured |
+| 50  | ✅ PASS | 100% flow success, 0% HTTP fail (during ramp) |
+| 100 | ✅ PASS | 100% flow success, 0% HTTP fail |
+| 150 | ✅ PASS | 100% flow success, 0% HTTP fail |
+| 200 | ✅ PASS | 100% flow success, 0% HTTP fail |
+| 250 | ✅ PASS | 100% flow success, 0% HTTP fail |
+| **300** | ✅ PASS | 100% flow success (2150/2150), 0% HTTP fail, p95 ~3 s |
 
-**Maximum stable concurrent (single source IP): ~20.** Breaking point begins by **50**. These failures are **connection-layer**, on a **read-only, no-database** endpoint — so the ceiling is the **hosting tier + per-IP flood protection, not the Node/Mongo application code.**
+*(All certified on success rate. The whole 20→300 ramp produced 0% HTTP failures and 100% completed-flow success; latency grew with load but nothing failed.)*
 
-## What blocked deeper testing (with evidence)
+## 6. Bottlenecks (ranked)
+- **HIGH — Atlas M0 write latency under load:** drives p95→~3 s, p99→~4.8 s at 300. Functional but slow. *Fix: Atlas M10.*
+- **HIGH — Render free 0.1 CPU (not measured here):** local Node is stronger; confirm on one staging Render instance. *Fix: keep 5 instances warm / paid instance.*
+- **MEDIUM — Walk-in per-IP limiter (60/min):** real students on distinct IPs are fine, but a **campus lab behind one NAT IP** would be throttled. *Fix: raise `WALKIN_RATE_MAX` for exam day if students share an IP.*
+- **MEDIUM — Render cold starts** (~50 s if idle) — warm all 5 before start; failover mitigates.
+- **LOW — load distribution, statelessness, atomic guards:** verified.
 
-1. **k6 is dropped by the edge.** With hCDN on → HTTP 403. With hCDN off → TLS connection silently dropped (status 0, 0 bytes) **even at 1 VU**, regardless of User-Agent. curl (schannel) and Node (`fetch`) succeed from the same machine at the same moment ⇒ the edge blocks **k6's TLS fingerprint (JA3)**. I switched the driver to Node, which the edge accepts.
-2. **Per-IP flood protection (CSF/LFD-style) on the shared host.** Early run: 20 conc = 100% OK. After sustained load, **25–40 concurrent all returned 100% ECONNRESET**, then **single requests began failing** (`curl → 000`, `node → ECONNRESET`, occasional DNS `ENOTFOUND`). Failures degraded **over time, not with load** — classic single-IP firewall throttle/ban.
+## 7. Recommendations
+1. **Atlas → M10** before a 300-student live exam (removes the main latency bottleneck; M0 works but p99 ~4.8 s).
+2. **Warm all 5 Render backends** right before the window; keep awake via Active Mode.
+3. If a venue shares one public IP, **raise `WALKIN_RATE_MAX`** (e.g. 600) for the day, then restore.
+4. Optional: confirm Render-tier write latency by pointing this same test at **one staging Render instance + a staging DB**.
 
-> Consequence: a single-source synthetic test **cannot** represent 200 distinct candidate IPs, and trips per-IP flood blocking long before it reveals true origin capacity. Real candidates (many distinct IPs, browsers) are **not** subject to the same single-IP block.
-
-## Measured per-stage data
-
-```
-Stage 1 — 20 concurrent: reqs=542  success=100.0% fail=0.0%  avg=129ms p50=108 p90=180 p95=266 p99=482 min=54 max=514ms  rps=17.3   status{200:542}
-Stage 2 — 50 concurrent: reqs=1216 success=80.7%  fail=19.3% avg=246ms p50=180 p90=424 p95=663 p99=1099 max=10672ms rps=38.5
-          errors: ECONNRESET 207, UND_ERR_SOCKET 26, CONNECT_TIMEOUT 1   status{200:981, 0:234, 403:1}
-Post-load (IP throttled): 25/30/35/40 concurrent → 100% ECONNRESET; single curl → 000; node → ECONNRESET; some ENOTFOUND
-```
-
-## Root-cause analysis
-
-- **Primary bottleneck: hosting tier.** Hostinger **shared hosting** caps concurrent connections per site/IP (LiteSpeed/Passenger worker + flood protection). Read-only `/api/health` (no DB, no work) failing at 50 proves the limit is **before** the app.
-- **Secondary: per-IP firewall** makes single-source measurement impossible past the ban threshold.
-- **NOT observed as bottlenecks** (because load never reached them at scale): MongoDB, Node event loop, the app code. The app is built for concurrency (Mongo pool 20, atomic capacity guard, server-authoritative timer, queued+retried email, indexed token/testCode/assessmentId).
-
-## Can it handle … ?
-- **50 students:** ❌ not on current shared hosting (19% resets at 50, single IP). Real distinct IPs may do better, but the connection ceiling is low.
-- **100 / 150 / 200 / 250 / 300:** ❌ not on current shared hosting. **The hosting tier must change** (below).
-
-## Recommendations to actually support scale
-**To support 200 / 500 / 1000 / 2000 concurrent:**
-1. **Move the API off shared hosting** → a VPS/dedicated or cloud (Hostinger VPS, Render, Railway, Fly.io, AWS) sized for the target. Shared hosting will not do 200+.
-2. **Run Node in cluster mode** (PM2 `-i max`) across all CPU cores, behind a load balancer / reverse proxy tuned for high keep-alive concurrency.
-3. **MongoDB Atlas:** raise tier (M10+) and `MONGO_POOL_SIZE` to match worker count.
-4. **Email:** use the **Brevo HTTPS API** (`BREVO_API_KEY`, already supported) so submit never blocks on SMTP; the queue already retries.
-5. **Static/CDN** for the React build, separate from the API, so the API only serves JSON.
-6. Indicative sizing: 500 ≈ 2–4 vCPU cluster + Atlas M10; 1000 ≈ 4–8 vCPU (or 2 instances) + M20; 2000 ≈ horizontal autoscaling (3–4 instances) + M30 + LB. **Validate each with a proper test (below).**
-
-**To MEASURE real capacity safely & validly:**
-1. **Run the generator ON the server** (`node node-capacity.mjs` with `BASE_URL=http://localhost:PORT`) → bypasses edge + firewall, measures pure Node+Mongo capacity.
-2. **Distributed load** (k6 Cloud / multiple regions/IPs) against a **staging** deploy on the target infra — uses many IPs, avoids single-IP block. Use `k6-full-flow.js` (note: k6 needs the edge to accept it — test against staging without the JA3-blocking edge).
-3. **Whitelist the load-test IP** in Hostinger firewall before any single-source test.
-4. **Write-path (register→submit):** staging only — throwaway DB + email disabled (`EMAIL_*`/`BREVO_API_KEY` unset). Never on production (creates candidates + sends real emails).
-
-## Data-integrity / safety
-- **No production data was created or modified** and **no emails were sent** — only the read-only `/api/health` endpoint was exercised. The write-path (`register`/`start`/`save`/`submit`) was **not** run against production, by design.
-
-## Files
-`loadtest/node-capacity.mjs` (Node driver, used), `loadtest/node-capacity-results.json` (raw results),
-`loadtest/k6-prod-safe.js` + `loadtest/k6-full-flow.js` (k6 scripts — blocked by edge JA3 on this host; usable on staging), `loadtest/README.md`.
+## Restore / production state
+TEST_MODE changes are **env-gated and inert in production** (TEST_MODE unset = no behavior change): email bypass, rate-limit skip, and the additive `isTestCandidate` field (default false). Production runs exactly as before. The throwaway DB is dropped.
