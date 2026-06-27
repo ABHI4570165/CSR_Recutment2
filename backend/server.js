@@ -21,6 +21,8 @@ app.set("trust proxy", 1);
 // which is why req.body appears empty and "All fields are required" fires.
 
 const normalise = (u) => (u || "").replace(/\/+$/, "").toLowerCase().trim();
+// Collapse "www." so https://www.site.com and https://site.com are treated as the SAME origin.
+const bare = (u) => normalise(u).replace(/^(https?:\/\/)www\./, "$1");
 
 const ALLOWED_ORIGINS = [
   process.env.FRONTEND_URL,    // e.g. https://mha-quiz.vercel.app
@@ -29,6 +31,7 @@ const ALLOWED_ORIGINS = [
   "http://localhost:4173",
 ].filter(Boolean).map(normalise);
 
+const ALLOWED_BARE = ALLOWED_ORIGINS.map(bare);
 console.log("[CORS] Allowed origins:", ALLOWED_ORIGINS);
 
 const corsOptions = {
@@ -39,8 +42,8 @@ const corsOptions = {
     // Always allow in development
     if (process.env.NODE_ENV !== "production") return cb(null, true);
 
-    const norm = normalise(origin);
-    const allowed = ALLOWED_ORIGINS.some(
+    const norm = bare(origin); // compare ignoring www. on both sides
+    const allowed = ALLOWED_BARE.some(
       (o) => norm === o || norm.startsWith(o + "/")
     );
 
