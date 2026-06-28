@@ -5,6 +5,16 @@ node_modules/
 # Build output
 frontend/dist/
 frontend/.env.production
+backend/client/
+
+# Deploy artifacts (zips + extracted builds) — generated, not source
+*.zip
+mha-frontend/
+mha-fullstack/
+
+# Load-test generated results (scripts + REPORT.md are kept)
+loadtest/*-results.json
+loadtest/full-flow-summary.json
 
 # Environment secrets — NEVER commit these
 backend/.env
