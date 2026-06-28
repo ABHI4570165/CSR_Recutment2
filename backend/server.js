@@ -91,12 +91,8 @@ mongoose.connect(process.env.MONGO_URI, {
   // Start the invitation email scheduler once the DB is ready.
   try { require("./utils/emailQueue").startScheduler(); }
   catch (e) { console.warn("Email scheduler not started:", e.message); }
-  // Start the Assessment Active Mode auto-off scheduler + server-side keep-alive.
-  try {
-    const sys = require("./controllers/systemController");
-    sys.startAutoOffScheduler();
-    sys.startKeepAlive();   // self-pings own public URL while Active Mode is ON (keeps Render awake, no browser needed)
-  }
+  // Start the Assessment Active Mode auto-off scheduler.
+  try { require("./controllers/systemController").startAutoOffScheduler(); }
   catch (e) { console.warn("Active-mode scheduler not started:", e.message); }
 }).catch((err) => { console.error("❌  MongoDB:", err.message); process.exit(1); });
 
