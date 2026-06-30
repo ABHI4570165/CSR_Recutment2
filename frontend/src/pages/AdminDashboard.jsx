@@ -965,8 +965,9 @@ function DrivesTab() {
   const loadSections=useCallback(async()=>{ try{const r=await fetchSections(); setSections(r.data.data||[]);}catch{} },[]);
   useEffect(()=>{ loadDrives(); loadSections(); },[loadDrives,loadSections]);
 
-  const loadDriveData=useCallback(async(assessmentId)=>{
-    setLoading(true);
+  // silent=true → background auto-refresh: update data WITHOUT the loading flash/re-mount.
+  const loadDriveData=useCallback(async(assessmentId,{silent=false}={})=>{
+    if(!silent) setLoading(true);
     try{
       const [s,c,cl]=await Promise.all([
         fetchCandidateStats({assessmentId}),
@@ -974,7 +975,7 @@ function DrivesTab() {
         fetchDriveColleges({assessmentId}),
       ]);
       setStats(s.data.data); setCands(c.data.data); setPag(c.data.pagination); setColleges(cl.data.data);
-    }catch{} finally{ setLoading(false); }
+    }catch{} finally{ if(!silent) setLoading(false); }
   },[page,fCollege,fStatus,fSource,fMinScore,search]);
 
   useEffect(()=>{ if(sel) loadDriveData(sel._id); },[sel,loadDriveData]);
@@ -1086,9 +1087,13 @@ function DrivesTab() {
   // Auto-refresh so DB changes (deletes, new walk-in registrations, submissions)
   // reflect in the dashboard without a manual reload.
   useEffect(()=>{
-    const iv=setInterval(()=>{ if(sel){ loadDriveData(sel._id); } else { loadDrives(); } }, 12000);
+    const iv=setInterval(()=>{
+      if(profileCand||resumeView) return;                 // pause while viewing a candidate/resume
+      if(sel){ loadDriveData(sel._id,{silent:true}); }    // silent → data updates, no loading flash
+      else { loadDrives(); }                              // drive list: setDrives only, already silent
+    }, 12000);
     return ()=>clearInterval(iv);
-  },[sel,loadDriveData,loadDrives]);
+  },[sel,loadDriveData,loadDrives,profileCand,resumeView]);
 
   const confirmEl = (
     <>
@@ -1548,19 +1553,23 @@ function AllCandidatesTab() {
   const params=()=>({ page, limit:20, search:search||undefined, college:college||undefined, source:source||undefined,
     status:status||undefined, minScore:minScore||undefined, assessmentId:driveId||undefined });
 
-  const load=useCallback(async()=>{
-    setLoading(true);
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent) setLoading(true);
     try{ const r=await fetchCandidates(params()); setRows(r.data.data); setPag(r.data.pagination); }
-    catch{} finally{ setLoading(false); }
+    catch{} finally{ if(!silent) setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[page,search,college,source,status,minScore,driveId]);
 
-  useEffect(()=>{ (async()=>{ try{const [cl,dr]=await Promise.all([fetchDriveColleges({}),fetchAssessments()]); setColleges(cl.data.data||[]); setDrives(dr.data.data||[]);}catch{} })(); },[]);
-  useEffect(()=>{ load(); },[load]);
-  useEffect(()=>{ const iv=setInterval(load,15000); return ()=>clearInterval(iv); },[load]); // auto-refresh
-
   const [resumeView,setResumeView]=useState(null);
   const [profileCand,setProfileCand]=useState(null);
+
+  useEffect(()=>{ (async()=>{ try{const [cl,dr]=await Promise.all([fetchDriveColleges({}),fetchAssessments()]); setColleges(cl.data.data||[]); setDrives(dr.data.data||[]);}catch{} })(); },[]);
+  useEffect(()=>{ load(); },[load]);
+  // Silent auto-refresh — updates data only, no loading flash; paused while viewing a candidate/resume.
+  useEffect(()=>{
+    const iv=setInterval(()=>{ if(!profileCand && !resumeView) load({silent:true}); },15000);
+    return ()=>clearInterval(iv);
+  },[load,profileCand,resumeView]);
   const exportAll=async()=>{
     setExporting(true);
     try{
