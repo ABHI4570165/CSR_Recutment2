@@ -192,8 +192,20 @@ export default function WalkInPortal() {
 
               {/* Test code FIRST — verifying it loads the college dropdown below. */}
               <div className="wp-codebox">
-                {inputFor(["testCode", "Test Code", "text", true])}
-                {codeChecking && <div className="wp-checking"><span className="wp-spin" /> Verifying test code…</div>}
+                <div className="wp-field wp-field--full">
+                  <label className="wp-label">Test Code<span className="wp-req"> *</span></label>
+                  <div className="wp-code-row">
+                    <input className={`wp-input ${fieldErr.testCode ? "wp-input--err" : ""}`} value={form.testCode}
+                      onChange={set("testCode")} placeholder="e.g. MH001" disabled={codeChecking}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); checkCode(); } }} />
+                    <button type="button" className="wp-btn wp-btn--verify" onClick={checkCode}
+                      disabled={codeChecking || !form.testCode.trim()}>
+                      {codeChecking ? <><span className="wp-spin" /> Verifying…</> : "Verify"}
+                    </button>
+                  </div>
+                  {fieldErr.testCode && <span className="wp-field-err">{fieldErr.testCode}</span>}
+                </div>
+                {codeChecking && <div className="wp-checking"><span className="wp-spin" /> Verifying… (first check may take a few seconds if the server was idle)</div>}
                 {drive && (
                   <div className="wp-drive">
                     <div className="wp-drive-name">✓ {drive.assessmentName}</div>
