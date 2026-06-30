@@ -777,7 +777,8 @@ export default function AssessmentPage() {
       const g = await getGeoOnce();
       if (!g) return; // can't read now — don't penalise transient failures
       const dist = haversineM(loc.lat, loc.lng, g.lat, g.lng);
-      if (dist > radius) {
+      const slack = Math.min(g.accuracy || 0, 500); // tolerate GPS inaccuracy (same as server)
+      if (dist > radius + slack) {
         const v = (violRef.current.location || 0) + 1;
         if (v >= 2) { recordViolation("location", "tab", "Location Violation"); terminateNow("Location Violation"); }
         else { violRef.current = { ...violRef.current, location: v }; setFaceWarn(`You appear to have left the permitted location (${dist}m). One more breach will terminate the assessment.`); }

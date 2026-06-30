@@ -117,7 +117,15 @@ exports.adminLogin = async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Username and password required." });
     }
-    if (username !== process.env.ADMIN_USERNAME || password !== process.env.ADMIN_PASSWORD) {
+    // Full admin OR read-only viewer. Viewer is optional (only if env is set).
+    let role = null;
+    if (username === process.env.ADMIN_USERNAME && password === process.env.ADMIN_PASSWORD) {
+      role = "admin";
+    } else if (process.env.VIEWER_USERNAME && process.env.VIEWER_PASSWORD &&
+               username === process.env.VIEWER_USERNAME && password === process.env.VIEWER_PASSWORD) {
+      role = "viewer";
+    }
+    if (!role) {
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
     if (!process.env.ADMIN_JWT_SECRET) {
@@ -125,11 +133,11 @@ exports.adminLogin = async (req, res) => {
       return res.status(500).json({ success: false, message: "Server config error: ADMIN_JWT_SECRET not set." });
     }
     const token = jwt.sign(
-      { role: "admin", username },
+      { role, username },
       process.env.ADMIN_JWT_SECRET,
-      { expiresIn: "12h" }
+      { expiresIn: "30d" }  // long-lived so the session survives closing the browser (mobile + desktop)
     );
-    return res.json({ success: true, token });
+    return res.json({ success: true, token, role });
   } catch (err) {
     console.error("[adminLogin] Error:", err);
     return res.status(500).json({ success: false, message: "Server error." });

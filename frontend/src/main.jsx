@@ -3,9 +3,10 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./styles/global.css";
 
-// Obscure student entry path (in addition to /test). Hard to guess so candidates
-// can't wander to the admin page. Change this string anytime you want a new secret link.
-const STUDENT_SECURE_PATH = "qmxz7kvr9p";
+// Admin/viewer dashboards live on hard-to-guess paths (NOT /admin, which is easily
+// guessed). Change these strings anytime you want new secret links.
+const ADMIN_PATH  = "mh-ctrl-9x7k2q4z";   // full admin (create/edit/delete)
+const VIEWER_PATH = "mh-view-3p8w5n6t";   // read-only dashboard
 
 // Lazy-loaded routes → smaller initial bundle, faster first paint under load.
 const RegisterPage   = lazy(() => import("./pages/RegisterPage"));
@@ -27,16 +28,14 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <BrowserRouter>
       <Suspense fallback={<Loading />}>
         <Routes>
-          {/* Admin login/dashboard — password protected, NOT on the root path so a
-              student clearing the URL can never land here. */}
-          <Route path="/admin"   element={<AdminDashboard />} />
+          {/* Admin (full) + Viewer (read-only) — on hard-to-guess paths, password protected. */}
+          <Route path={`/${ADMIN_PATH}`}  element={<AdminDashboard mode="admin" />} />
+          <Route path={`/${VIEWER_PATH}`} element={<AdminDashboard mode="viewer" />} />
 
-          {/* Public candidate flows — the walk-in portal is reachable at BOTH /test
-              and the obscure secret path. */}
-          <Route path="/test"                          element={<WalkInPortal />} />
-          <Route path={`/${STUDENT_SECURE_PATH}`}      element={<WalkInPortal />} />
-          <Route path="/assessment/:token"             element={<AssessmentPage />} />
-          <Route path="/candidate/:token"              element={<AssessmentPage />} />
+          {/* Public candidate flows. */}
+          <Route path="/test"               element={<WalkInPortal />} />
+          <Route path="/assessment/:token"  element={<AssessmentPage />} />
+          <Route path="/candidate/:token"   element={<AssessmentPage />} />
 
           {/* Legacy public-registration quiz (kept) */}
           <Route path="/register" element={<RegisterPage />} />
@@ -44,10 +43,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/quiz"     element={<QuizPage />} />
 
           {/* Root → walk-in portal. Clearing the URL sends students to the portal,
-              NEVER to the admin page. */}
+              NEVER to any dashboard. */}
           <Route path="/" element={<Navigate to="/test" replace />} />
 
-          {/* Anything else → friendly 404 (never the admin page). */}
+          {/* Anything else → friendly 404 (never a dashboard). */}
           <Route path="*" element={<ErrorPage code="404" />} />
         </Routes>
       </Suspense>

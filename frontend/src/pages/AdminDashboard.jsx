@@ -11,6 +11,10 @@ import {
 } from "../utils/api";
 import "./AdminDashboard.css";
 
+// Read-only viewer? (role stored at login). Mutating UI is hidden when true;
+// the backend ALSO rejects mutations from viewer tokens (defence in depth).
+const isViewer = () => localStorage.getItem("adminRole") === "viewer";
+
 const fmtDate = d => d ? new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}) : "—";
 const fmtDateTime = d => d ? new Date(d).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}) : "—";
 const fmtTimeOnly = d => d ? new Date(d).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) : "—";
@@ -279,7 +283,8 @@ function LoginScreen({ onLogin }) {
     e.preventDefault(); setErr(""); setLoading(true);
     try {
       const res = await adminLogin({ username:user, password:pass });
-      sessionStorage.setItem("adminToken", res.data.token);
+      localStorage.setItem("adminToken", res.data.token);          // persistent (survives browser close)
+      localStorage.setItem("adminRole", res.data.role || "admin"); // "admin" | "viewer"
       onLogin();
     } catch(er) { setErr(er.message||"Invalid credentials"); }
     finally { setLoading(false); }
@@ -1112,7 +1117,7 @@ function DrivesTab() {
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
-        <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>
+        {!isViewer() && <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>}
       </div>
       <div className="ad-toolbar" style={{marginBottom:14}}>
         {[["active","Active"],["archived","Archived"],["all","All"]].map(([v,l])=>(
@@ -1149,10 +1154,12 @@ function DrivesTab() {
               </div>
               <div className="ad-drive-actions" onClick={e=>e.stopPropagation()}>
                 <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>openDrive(d)}>View</button>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setEditDrive(d)}>Edit</button>
                 <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>exportDriveCandidates(d)}>Export</button>
-                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>archiveDrive(d)}>{d.status==="ARCHIVED"?"Unarchive":"Archive"}</button>
-                <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>delDrive(d)}>Delete</button>
+                {!isViewer() && <>
+                  <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setEditDrive(d)}>Edit</button>
+                  <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>archiveDrive(d)}>{d.status==="ARCHIVED"?"Unarchive":"Archive"}</button>
+                  <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>delDrive(d)}>Delete</button>
+                </>}
               </div>
             </div>
             );
@@ -1194,8 +1201,8 @@ function DrivesTab() {
             <button className="ad-btn ad-btn--primary" onClick={()=>copyLink(portalUrl)}>🔗 Copy Test Portal Link</button>
           ) : (
             <>
-              <button className="ad-btn ad-btn--primary" onClick={()=>setShowUpload(true)}>+ Upload Candidates</button>
-              <button className="ad-btn ad-btn--outline" onClick={sendInvites} disabled={busy}>{busy?<><Spinner/>…</>:"📧 Send Pending Invites"}</button>
+              {!isViewer() && <button className="ad-btn ad-btn--primary" onClick={()=>setShowUpload(true)}>+ Upload Candidates</button>}
+              {!isViewer() && <button className="ad-btn ad-btn--outline" onClick={sendInvites} disabled={busy}>{busy?<><Spinner/>…</>:"📧 Send Pending Invites"}</button>}
               <button className="ad-btn ad-btn--outline" onClick={runTestEmail} disabled={busy}>✉ Test Email</button>
             </>
           )}
@@ -1871,7 +1878,7 @@ function Dashboard({ onLogout }) {
           <div className="ad-topbar-logo"><img src="/logo.png" alt="M H Foundation" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
           <div>
             <div className="ad-topbar-title">M H FOUNDATION</div>
-            <div className="ad-topbar-sub">Admin Dashboard · M H Foundation®</div>
+            <div className="ad-topbar-sub">{isViewer()?"Viewer (read-only) · M H Foundation®":"Admin Dashboard · M H Foundation®"}</div>
           </div>
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -1882,10 +1889,10 @@ function Dashboard({ onLogout }) {
         </div>
       </header>
 
-      <div style={{padding:"0 0"}}><ActiveModeBanner/></div>
+      {!isViewer() && <div style={{padding:"0 0"}}><ActiveModeBanner/></div>}
 
       <nav className="ad-tabs">
-        {TABS.map(t=>(
+        {TABS.filter(t=>!isViewer() || !["questions","cutoff","settings"].includes(t.id)).map(t=>(
           <button key={t.id} className={`ad-tab ${tab===t.id?"ad-tab--active":""}`} onClick={()=>setTab(t.id)}>
             <span>{t.icon}</span>{t.label}
           </button>
@@ -2201,7 +2208,7 @@ function Dashboard({ onLogout }) {
 }
 
 export default function AdminDashboard() {
-  const [loggedIn,setLoggedIn] = useState(()=>!!sessionStorage.getItem("adminToken"));
+  const [loggedIn,setLoggedIn] = useState(()=>!!localStorage.getItem("adminToken"));
   if(!loggedIn) return <LoginScreen onLogin={()=>setLoggedIn(true)}/>;
   return <Dashboard onLogout={()=>{ clearAdminToken(); setLoggedIn(false); }}/>;
 }

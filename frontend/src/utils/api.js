@@ -54,7 +54,7 @@ api.interceptors.request.use((cfg) => {
 });
 adminApi.interceptors.request.use((cfg) => {
   if (!cfg.baseURL) cfg.baseURL = currentBase();
-  const token = sessionStorage.getItem("adminToken");
+  const token = localStorage.getItem("adminToken");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
@@ -150,7 +150,7 @@ export const submitQuiz    = (d) => api.post("/quiz/submit", d);
 
 // ── Admin APIs ────────────────────────────────────────────────────────────────
 export const adminLogin      = (d)    => adminApi.post("/auth/admin/login", d);
-export const clearAdminToken = ()     => sessionStorage.removeItem("adminToken");
+export const clearAdminToken = ()     => { localStorage.removeItem("adminToken"); localStorage.removeItem("adminRole"); };
 export const fetchStats      = ()     => adminApi.get("/admin/stats");
 export const fetchUsers      = (p)    => adminApi.get("/admin/users",    { params: p });
 export const fetchUserDetail = (id)   => adminApi.get(`/admin/users/${id}`);

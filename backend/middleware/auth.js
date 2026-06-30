@@ -30,4 +30,12 @@ function authAdmin(req, res, next) {
   }
 }
 
-module.exports = { authStudent, authAdmin };
+// Require FULL admin (reject read-only viewer tokens) — for any mutating endpoint.
+function requireFullAdmin(req, res, next) {
+  if (req.admin?.role === "viewer") {
+    return res.status(403).json({ success: false, message: "Read-only access — this action is not permitted." });
+  }
+  next();
+}
+
+module.exports = { authStudent, authAdmin, requireFullAdmin };

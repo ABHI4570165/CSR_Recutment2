@@ -779,7 +779,12 @@ exports.startCandidate = async (req, res) => {
       }
       const distance = haversineMeters(locCfg.lat, locCfg.lng, g.lat, g.lng);
       const radius = locCfg.radiusMeters || 200;
-      const inside = distance <= radius;
+      // Tolerate GPS inaccuracy: indoor/WiFi positioning is often off by 50–300 m, so a
+      // student standing INSIDE the venue can report coords beyond the radius. Allow the
+      // reported accuracy as slack (capped at 500 m so a wildly-wrong reading can't fully bypass).
+      const acc = Math.max(0, Number(g.accuracy) || 0);
+      const slack = Math.min(acc, 500);
+      const inside = distance <= radius + slack;
       c.geo = { lat: g.lat, lng: g.lng, accuracy: g.accuracy ?? null, distance, inside, capturedAt: new Date() };
       if (!inside) {
         await c.save();
