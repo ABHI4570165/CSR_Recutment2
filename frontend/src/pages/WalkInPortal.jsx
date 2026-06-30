@@ -205,7 +205,6 @@ export default function WalkInPortal() {
                   </div>
                   {fieldErr.testCode && <span className="wp-field-err">{fieldErr.testCode}</span>}
                 </div>
-                {codeChecking && <div className="wp-checking"><span className="wp-spin" /> Verifying… (first check may take a few seconds if the server was idle)</div>}
                 {drive && (
                   <div className="wp-drive">
                     <div className="wp-drive-name">✓ {drive.assessmentName}</div>
