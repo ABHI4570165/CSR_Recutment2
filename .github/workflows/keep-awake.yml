@@ -27,6 +27,7 @@ jobs:
             "https://csr-recutment2-1.onrender.com/api/health"
             "https://csr-recutment2-gyrc.onrender.com/api/health"
             "https://csr-recutment2-7i09.onrender.com/api/health"
+            "https://csr-recutment2-cxjs.onrender.com/api/health"
             "https://csr-recutment2.onrender.com/api/health"
           )
           ping_all () {
