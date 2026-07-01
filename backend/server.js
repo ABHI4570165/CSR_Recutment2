@@ -64,8 +64,10 @@ app.use(cors(corsOptions));
 
 // ── STEP 2: Body parsers — must come AFTER cors, BEFORE routes ───────────────
 // Without express.json() the req.body will always be undefined/empty.
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+// 12mb: resumes (up to 5 MB) are sent as base64 in JSON (~33% larger) plus form
+// fields — a 2mb limit rejected normal resumes with HTTP 413 "request entity too large".
+app.use(express.json({ limit: "12mb" }));
+app.use(express.urlencoded({ extended: true, limit: "12mb" }));
 
 // ── STEP 3: Other middleware ──────────────────────────────────────────────────
 // CSP disabled: Express now serves the React SPA on the SAME origin, and the
