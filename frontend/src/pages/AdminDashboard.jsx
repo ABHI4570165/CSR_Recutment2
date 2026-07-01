@@ -274,7 +274,7 @@ function SettingsTab({ settings, setSettings, updateSection, handleSaveSettings,
 }
 
 // ── Login Screen ──────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen({ mode = "admin", onLogin }) {
   const [user,setUser]= useState("");
   const [pass,setPass]= useState("");
   const [err, setErr] = useState("");
@@ -283,8 +283,15 @@ function LoginScreen({ onLogin }) {
     e.preventDefault(); setErr(""); setLoading(true);
     try {
       const res = await adminLogin({ username:user, password:pass });
+      const role = res.data.role || "admin";
+      if (role !== mode) {  // credentials belong to the other dashboard
+        setErr(mode==="admin"
+          ? "These credentials are not valid for the admin dashboard."
+          : "These credentials are not valid for the viewer dashboard.");
+        setLoading(false); return;
+      }
       localStorage.setItem("adminToken", res.data.token);          // persistent (survives browser close)
-      localStorage.setItem("adminRole", res.data.role || "admin"); // "admin" | "viewer"
+      localStorage.setItem("adminRole", role);                     // "admin" | "viewer"
       onLogin();
     } catch(er) { setErr(er.message||"Invalid credentials"); }
     finally { setLoading(false); }
@@ -294,7 +301,7 @@ function LoginScreen({ onLogin }) {
       <div className="ad-login-card">
         <div className="ad-login-logo"><img src="/logo.png" alt="M H Foundation" style={{width:"100%",height:"100%",objectFit:"contain",borderRadius:"inherit"}} onError={e=>{e.currentTarget.parentNode.textContent="M";}}/></div>
         <div className="ad-login-brand">M H FOUNDATION</div>
-        <div className="ad-login-sub">M H Foundation® · Admin Portal</div>
+        <div className="ad-login-sub">M H Foundation® · {mode==="viewer"?"Viewer (Read-only)":"Admin"} Portal</div>
         <form className="ad-login-form" onSubmit={submit}>
           <div className="ad-field">
             <label className="ad-label">Username</label>
@@ -2216,8 +2223,16 @@ function Dashboard({ onLogout }) {
   );
 }
 
-export default function AdminDashboard() {
-  const [loggedIn,setLoggedIn] = useState(()=>!!localStorage.getItem("adminToken"));
-  if(!loggedIn) return <LoginScreen onLogin={()=>setLoggedIn(true)}/>;
+export default function AdminDashboard({ mode = "admin" }) {
+  // The URL decides which dashboard this is (admin vs viewer). A cached session for
+  // the OTHER role must NOT carry over — e.g. opening the admin URL while logged in
+  // as viewer should require an admin login, not silently show the viewer dashboard.
+  const [loggedIn,setLoggedIn] = useState(()=>{
+    const hasToken = !!localStorage.getItem("adminToken");
+    const role = localStorage.getItem("adminRole") || "admin";
+    if (hasToken && role !== mode) { clearAdminToken(); return false; } // wrong role for this URL → re-login
+    return hasToken;
+  });
+  if(!loggedIn) return <LoginScreen mode={mode} onLogin={()=>setLoggedIn(true)}/>;
   return <Dashboard onLogout={()=>{ clearAdminToken(); setLoggedIn(false); }}/>;
 }
