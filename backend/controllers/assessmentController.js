@@ -134,6 +134,21 @@ exports.updateAssessment = async (req, res) => {
     });
     const a = await Assessment.findByIdAndUpdate(req.params.id, { $set: update }, { new: true });
     if (!a) return res.status(404).json({ success: false, message: "Assessment not found." });
+
+    // If the schedule was changed, extend EXISTING candidates' token expiry to the new
+    // end time — otherwise candidates registered under the old schedule stay "expired"
+    // even though the drive window was moved. (tokenExpiresAt is frozen at registration.)
+    const scheduleChanged = ["endAt", "deadline", "assessmentDate", "startAt"].some(k => req.body[k] !== undefined);
+    if (scheduleChanged) {
+      const newExpiry = a.endAt || a.deadline || null;
+      if (newExpiry) {
+        const r = await Candidate.updateMany(
+          { assessmentId: a._id, status: { $nin: ["completed", "shortlisted", "rejected", "disqualified"] } },
+          { $set: { tokenExpiresAt: newExpiry } }
+        );
+        console.log(`[updateAssessment] schedule changed → extended tokenExpiresAt for ${r.modifiedCount} candidate(s)`);
+      }
+    }
     res.json({ success: true, data: a });
   } catch (err) {
     console.error("updateAssessment:", err);
