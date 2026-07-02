@@ -277,14 +277,17 @@ export default function AssessmentPage() {
         const data = res.data.data;
         setInfo(data);
         const state = res.data.state;
-        // Browser Refresh Protection: an in-progress attempt loading again = a refresh/re-entry.
-        // Allow one accidental refresh; the second terminates. (Only when the toggle is on.)
+        // Browser Refresh Protection: count reloads of an in-progress attempt. This must
+        // NOT punish legitimate resuming (network drop, closed tab, continuing next day),
+        // so the limit is generous + configurable (securityConfig.maxRefreshes, default 5).
+        // Only truly excessive refreshing terminates. Set the toggle off to disable entirely.
         if (state === "in-progress" && data?.security?.refreshProtection !== false) {
+          const maxR = Number(data?.securityConfig?.maxRefreshes) || 5;
           const key = `asmt_refresh_${token}`;
           const n = (parseInt(localStorage.getItem(key) || "0", 10) || 0) + 1;
           try { localStorage.setItem(key, String(n)); } catch { /* ignore */ }
           refreshCountRef.current = n;
-          if (n >= 2) {
+          if (n > maxR) {
             try { await submitCandidate(token, { answers: {}, reason: "auto-malpractice", terminationReason: "Browser Refresh Limit Exceeded", refreshCount: n }); } catch { /* idempotent */ }
             setPhase("terminated"); return;
           }
