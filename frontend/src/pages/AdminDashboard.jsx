@@ -784,10 +784,27 @@ function EditDriveModal({ drive, onClose, onSaved }) {
   const [security,setSecurity]=useState({...DEFAULT_SECURITY,...(drive.security||{})});
   const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG,...(drive.securityConfig||{}),location:{...DEFAULT_SEC_CONFIG.location,...((drive.securityConfig||{}).location||{})}});
   const [collegesText,setCollegesText]=useState((drive.colleges||[]).join("\n"));
+  // Editable schedule — prefill from the drive's current start/end (local time).
+  const _p=n=>String(n).padStart(2,"0");
+  const _s=drive.startAt?new Date(drive.startAt):null;
+  const _e=drive.endAt?new Date(drive.endAt):null;
+  const [date,setDate]=useState(_s?`${_s.getFullYear()}-${_p(_s.getMonth()+1)}-${_p(_s.getDate())}`:"");
+  const [startTime,setStartTime]=useState(_s?`${_p(_s.getHours())}:${_p(_s.getMinutes())}`:"");
+  const [endTime,setEndTime]=useState(_e?`${_p(_e.getHours())}:${_p(_e.getMinutes())}`:"");
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
+    // Schedule (optional to change, but if provided it must be valid).
+    let sched={};
+    if(date && startTime && endTime){
+      const startAt=combineDateTime(date,startTime), endAt=combineDateTime(date,endTime);
+      if(!startAt||!endAt){ setErr("Enter valid start and end times."); return; }
+      if(new Date(endAt)<=new Date(startAt)){ setErr("End time must be after start time."); return; }
+      sched={ assessmentDate:combineDateTime(date,"00:00"), startAt, endAt, deadline:endAt };
+    } else if(date || startTime || endTime){
+      setErr("To change the schedule, set the date, start time and end time."); return;
+    }
     setSaving(true); setErr("");
     try{
       await updateAssessment(drive._id,{
@@ -795,6 +812,7 @@ function EditDriveModal({ drive, onClose, onSaved }) {
         cutoff: cutoff===""?null:Number(cutoff),
         ...(drive.driveType==="WALK_IN" ? { maxCandidates: maxCandidates===""?null:Number(maxCandidates) } : {}),
         colleges: collegesText.split("\n").map(s=>s.trim()).filter(Boolean),
+        ...sched,
         security, securityConfig:secConfig,
       });
       onSaved();
@@ -841,6 +859,19 @@ function EditDriveModal({ drive, onClose, onSaved }) {
                 <textarea className="ad-input ad-textarea" rows={4} value={collegesText} placeholder={"RV College of Engineering\nBMS College of Engineering"} onChange={e=>setCollegesText(e.target.value)}/>
                 <span className="ad-hint">Candidates can only select from these — they can't type their own college.</span></div>
             )}
+          </section>
+
+          <section className="ad-card-section">
+            <div className="ad-card-section-title">🗓️ Assessment Schedule</div>
+            <div className="ad-grid-3">
+              <div className="ad-field"><label className="ad-label">Assessment Date</label>
+                <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
+              <div className="ad-field"><label className="ad-label">Start Time</label>
+                <input type="time" className="ad-input" value={startTime} onChange={e=>{setStartTime(e.target.value);setErr("");}}/></div>
+              <div className="ad-field"><label className="ad-label">End Time</label>
+                <input type="time" className="ad-input" value={endTime} onChange={e=>{setEndTime(e.target.value);setErr("");}}/></div>
+            </div>
+            <span className="ad-hint">Reschedule the drive here anytime after creation.</span>
           </section>
 
           <section className="ad-card-section">

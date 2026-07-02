@@ -112,12 +112,14 @@ function RulesModal({ onClose }) {
 // Block phones/tablets — proctored assessment requires a desktop/laptop browser.
 function isMobileDevice() {
   const ua = navigator.userAgent || "";
-  const mobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Silk|Kindle|PlayBook/i.test(ua);
-  // iPadOS 13+ masquerades as Mac — catch it via touch points.
-  const iPadOS = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-  const touch = (navigator.maxTouchPoints || 0) > 1;
-  const smallest = Math.min(window.screen?.width || 9999, window.screen?.height || 9999);
-  return mobileUA || iPadOS || (touch && smallest < 820);
+  // Block only genuine phones/tablets by user-agent. Do NOT use screen size or
+  // touch — many laptops have small resolutions and/or touchscreens, and were
+  // wrongly blocked. A laptop/desktop always reports a desktop UA.
+  const mobileUA = /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Silk|Kindle|PlayBook/i.test(ua)
+    || /\biPad\b/.test(ua);
+  // iPadOS 13+ masquerades as a Mac — a real Mac laptop has no touch, so touch+Mac = iPad.
+  const iPadOS = navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
+  return mobileUA || iPadOS;
 }
 
 /* ── V3.1 security helpers (config-driven; only used when the matching toggle is on) ── */
