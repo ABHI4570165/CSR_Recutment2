@@ -246,3 +246,14 @@
   .asmt-cam-float { width: 120px; }
   .asmt-cam-float video { height: 90px; }
 }
+
+/* ── Round-2 typed-answer question ── */
+.qp-text-answer { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.qp-text-label { font-size: 14px; font-weight: 700; color: var(--asmt-ink, #1e1b4b); }
+.qp-text-input {
+  border: 2px solid var(--asmt-line, #e5e7eb); border-radius: 12px; padding: 14px 16px;
+  font-size: 16px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--asmt-ink, #111827);
+  background: #fff; outline: none; width: 100%; transition: border-color .15s, box-shadow .15s;
+}
+.qp-text-input:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
+.qp-text-hint { font-size: 12px; color: var(--asmt-muted, #6b7280); }

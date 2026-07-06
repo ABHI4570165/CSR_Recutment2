@@ -61,6 +61,8 @@ exports.createAssessment = async (req, res) => {
       ...(Array.isArray(sections) && sections.length ? { sections } : {}),
       randomizeQuestions: randomizeQuestions !== false,
       randomizeOptions:   randomizeOptions   !== false,
+      ...(Number(b.round) === 2 ? { round: 2 } : {}),   // Round 2 = fed technical sets A/B
+
       ...(deadline ? { deadline: new Date(deadline) } : {}),
       // Scheduling window
       ...(b.assessmentDate ? { assessmentDate: toDate(b.assessmentDate) } : {}),
@@ -125,7 +127,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig"];
+      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
@@ -639,37 +641,45 @@ function windowState(assessment) {
 }
 
 // Build a fresh paper (question + option order) honouring randomization flags.
-async function buildPaper(assessment) {
+// Round 2: pass the candidate's assigned set ("A"/"B") — only that set's questions
+// are pulled. Supports both MCQ and typed-answer ("text") questions.
+async function buildPaper(assessment, set = null) {
   const sections = assessment.sections || [];
   const sectionNames = sections.map(s => s.name);
-  const all = await Question.find({ section: { $in: sectionNames } }).lean();
+  const filter = (assessment.round === 2)
+    ? { round: 2, set, section: { $in: sectionNames } }   // one set per candidate
+    : { section: { $in: sectionNames } };                 // round 1: unchanged pool
+  const all = await Question.find(filter).lean();
 
   const bySection = {};
   all.forEach(q => { (bySection[q.section] ||= []).push(q); });
 
   const questionOrder = [];
-  const optionOrder = {};   // qid -> [origIdx in display order]
+  const optionOrder = {};   // qid -> [origIdx in display order]  (mcq only)
   const clientQuestions = [];
 
-  // NOTE: we iterate sections in their fixed configured order and shuffle the
-  // pool WITHIN each section only — questions can never cross section boundaries.
+  // Iterate sections in fixed configured order; shuffle the pool WITHIN each
+  // section only (jumbled per section) — questions never cross section boundaries.
   sections.forEach(sec => {
     let pool = bySection[sec.name] || [];
     pool = assessment.randomizeQuestions ? shuffle(pool) : pool.sort((a, b) => (a.order || 0) - (b.order || 0));
     pool = pool.slice(0, sec.questionCount || pool.length);
     pool.forEach(q => {
       const qid = String(q._id);
-      const idxs = q.options.map((_, i) => i);
-      const dispIdxs = assessment.randomizeOptions ? shuffle(idxs) : idxs;
       questionOrder.push(qid);
-      optionOrder[qid] = dispIdxs;
-      clientQuestions.push({
-        id: qid,
-        section: q.section,
-        sectionLabel: sec.displayName || sec.name,
-        text: q.text,
-        options: dispIdxs.map(oi => q.options[oi]), // display order, no correctIndex leaked
-      });
+      if (q.type === "text") {
+        // Typed-answer: no options, no answer leaked to the client.
+        clientQuestions.push({ id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text, type: "text", marks: q.marks || 1 });
+      } else {
+        const idxs = (q.options || []).map((_, i) => i);
+        const dispIdxs = assessment.randomizeOptions ? shuffle(idxs) : idxs;
+        optionOrder[qid] = dispIdxs;
+        clientQuestions.push({
+          id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text,
+          type: "mcq", marks: q.marks || 1,
+          options: dispIdxs.map(oi => q.options[oi]), // display order, no correctIndex leaked
+        });
+      }
     });
   });
 
@@ -690,11 +700,15 @@ async function rehydratePaper(progress, assessment) {
   ids.forEach(qid => {
     const q = map[qid];
     if (!q) return;
-    const dispIdxs = optionOrder[qid] || q.options.map((_, i) => i);
-    clientQuestions.push({
-      id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section,
-      text: q.text, options: dispIdxs.map(oi => q.options[oi]),
-    });
+    if (q.type === "text") {
+      clientQuestions.push({ id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section, text: q.text, type: "text", marks: q.marks || 1 });
+    } else {
+      const dispIdxs = optionOrder[qid] || (q.options || []).map((_, i) => i);
+      clientQuestions.push({
+        id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section,
+        text: q.text, type: "mcq", marks: q.marks || 1, options: dispIdxs.map(oi => q.options[oi]),
+      });
+    }
   });
   return clientQuestions;
 }
@@ -811,8 +825,17 @@ exports.startCandidate = async (req, res) => {
       c.geo = { lat: req.body.geo.lat, lng: req.body.geo.lng, accuracy: req.body.geo.accuracy ?? null, distance: null, inside: null, capturedAt: new Date() };
     }
 
+    // Round 2: assign this candidate ONE set (A/B), alternating by start order.
+    // Fixed once and stored so a resume shows the same paper.
+    let assignedSet = c.assignedSet || null;
+    if (assessment.round === 2 && !assignedSet) {
+      const already = await Candidate.countDocuments({ assessmentId: assessment._id, assignedSet: { $ne: null } });
+      assignedSet = (already % 2 === 0) ? "A" : "B";
+      c.assignedSet = assignedSet;
+    }
+
     // Fresh start
-    const { questionOrder, optionOrder, clientQuestions } = await buildPaper(assessment);
+    const { questionOrder, optionOrder, clientQuestions } = await buildPaper(assessment, assignedSet);
     if (!clientQuestions.length) {
       return res.status(400).json({ success: false, message: "No questions configured for this assessment." });
     }
@@ -894,14 +917,21 @@ exports.submitCandidate = async (req, res) => {
     const sectionScores = {};
     (assessment.sections || []).forEach(s => { sectionScores[s.name] = 0; });
 
+    const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     qids.forEach(qid => {
       const q = qmap[qid];
       if (!q) return;
       totalMarks += q.marks || 1;
-      const dispIdx = answers[qid];
-      if (dispIdx == null) return;
-      const origIdx = (optionOrder[qid] || [])[dispIdx];
-      if (origIdx === q.correctIndex) {
+      const ans = answers[qid];
+      if (ans == null || ans === "") return;
+      let correct;
+      if (q.type === "text") {
+        correct = q.answerText != null && norm(ans) === norm(q.answerText); // typed exact-output answer
+      } else {
+        const origIdx = (optionOrder[qid] || [])[ans];                      // mcq: map display→original
+        correct = origIdx === q.correctIndex;
+      }
+      if (correct) {
         score += q.marks || 1;
         sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
       }

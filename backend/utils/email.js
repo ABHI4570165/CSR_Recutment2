@@ -299,19 +299,22 @@ function disqualificationHtml({ name }) {
   return shell(inner);
 }
 
-function thankYouHtml({ name, assessmentName }) {
+function thankYouHtml({ name, assessmentName, round }) {
+  const isR2 = Number(round) === 2;
+  const roundLine = isR2
+    ? `You have successfully completed <strong>Round 2 — the Technical Assessment</strong>.`
+    : `Your responses for <strong>${esc(assessmentName || "the assessment")}</strong> have been submitted successfully and recorded.`;
+  const nextLine = isR2
+    ? `This concludes the Technical Round. Shortlisted candidates will be contacted for the next stage of the selection process.`
+    : `Assessment completed. Shortlisted candidates will be contacted by our team members. We appreciate your time and effort. Best of luck!`;
   const inner = `
     <div style="padding:32px 28px;">
       <div style="text-align:center;font-size:40px;margin-bottom:8px;">✅</div>
       <h2 style="color:#111827;font-size:19px;margin:0 0 10px;text-align:center;">Thank You, ${esc(name)}!</h2>
-      <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 18px;text-align:center;">
-        Your responses for <strong>${esc(assessmentName || "the assessment")}</strong> have been submitted successfully and recorded.
-      </p>
+      ${isR2 ? `<div style="text-align:center;margin:0 0 12px;"><span style="display:inline-block;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:800;letter-spacing:.5px;padding:6px 14px;border-radius:999px;">TECHNICAL ROUND · ROUND 2</span></div>` : ``}
+      <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 18px;text-align:center;">${roundLine}</p>
       <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;text-align:center;">
-        <p style="color:#065f46;font-size:13px;margin:0;line-height:1.6;">
-          Assessment completed. Shortlisted candidates will be contacted by our team members.
-          We appreciate your time and effort. Best of luck!
-        </p>
+        <p style="color:#065f46;font-size:13px;margin:0;line-height:1.6;">${nextLine}</p>
       </div>
       ${whatsappBlock()}
     </div>`;
@@ -377,11 +380,16 @@ async function sendDisqualificationEmail(candidate) {
 }
 
 async function sendThankYouEmail(candidate, assessment) {
+  const isR2 = Number(assessment?.round) === 2;
   return sendMail({
     to: candidate.email,
-    subject: `Assessment Completed — ${assessment?.name || ""} | ${BRAND}`,
-    html: thankYouHtml({ name: candidate.name, assessmentName: assessment?.name }),
-    text: `Thank you ${candidate.name}! Your responses for ${assessment?.name || "the assessment"} have been recorded.\n\nJoin our WhatsApp community to stay updated with your results and next steps:\n${WHATSAPP_GROUP}\n\n${BRAND} · ${HIRING_PARTNER}`,
+    subject: isR2
+      ? `Technical Round Completed (Round 2) | ${BRAND}`
+      : `Assessment Completed — ${assessment?.name || ""} | ${BRAND}`,
+    html: thankYouHtml({ name: candidate.name, assessmentName: assessment?.name, round: assessment?.round }),
+    text: isR2
+      ? `Thank you ${candidate.name}! You have successfully completed Round 2 — the Technical Assessment. Shortlisted candidates will be contacted for the next stage.\n\nJoin our WhatsApp community for updates:\n${WHATSAPP_GROUP}\n\n${BRAND}`
+      : `Thank you ${candidate.name}! Your responses for ${assessment?.name || "the assessment"} have been recorded.\n\nJoin our WhatsApp community to stay updated with your results and next steps:\n${WHATSAPP_GROUP}\n\n${BRAND} · ${HIRING_PARTNER}`,
   });
 }
 

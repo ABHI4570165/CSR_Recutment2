@@ -28,20 +28,43 @@ function sectionColor(sec, idx) {
 
 const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
-// ── Question Form ─────────────────────────────────────────────────────────────
+// Round-2 technical section options (for the section dropdown when editing/creating).
+const TECH_SECTION_OPTS = [
+  { name:"t_sec_a", displayName:"[R2] Section A — Tricky Concept MCQs" },
+  { name:"t_sec_b", displayName:"[R2] Section B — Predict the Output" },
+  { name:"t_sec_c", displayName:"[R2] Section C — Predict the Output: Advanced" },
+];
+
+// ── Question Form (MCQ or typed-answer) ───────────────────────────────────────
 function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
   const [text,   setText]   = useState(initial?.text||"");
+  const [type,   setType]   = useState(initial?.type||"mcq");
   const [opts,   setOpts]   = useState(initial?.options||["","","",""]);
   const [correct,setCorrect]= useState(initial?.correctIndex??0);
+  const [answerText,setAnswerText]=useState(initial?.answerText||"");
   const [marks,  setMarks]  = useState(initial?.marks||1);
   const [section,setSection]= useState(initial?.section||(sections[0]?.name||"aptitude"));
+  const [round,  setRound]  = useState(initial?.round||1);
+  const [set,    setSet]    = useState(initial?.set||"");
   const [err,    setErr]    = useState("");
+
+  // Section options: round-1 pool + the round-2 tech sections + the question's own section.
+  const secOpts=[...sections.map(s=>({name:s.name,displayName:s.displayName})),...TECH_SECTION_OPTS];
+  if(initial?.section && !secOpts.some(s=>s.name===initial.section)) secOpts.push({name:initial.section,displayName:initial.section});
 
   const save = () => {
     if(!text.trim())          { setErr("Question text is required."); return; }
-    if(opts.some(o=>!o.trim())){ setErr("All 4 options are required."); return; }
-    if(!section)               { setErr("Please select a section."); return; }
-    onSave({ text:text.trim(), options:opts.map(o=>o.trim()), correctIndex:correct, marks:Number(marks), section });
+    if(!section)              { setErr("Please select a section."); return; }
+    if(Number(round)===2 && !set){ setErr("Round 2 questions must belong to Set A or Set B."); return; }
+    const base={ text:text.trim(), type, marks:Number(marks)||1, section,
+      round:Number(round)||1, set: Number(round)===2 ? set : null };
+    if(type==="text"){
+      if(!answerText.trim()){ setErr("Enter the expected answer for this text question."); return; }
+      onSave({ ...base, answerText:answerText.trim() });
+    } else {
+      if(opts.some(o=>!o.trim())){ setErr("All 4 options are required."); return; }
+      onSave({ ...base, options:opts.map(o=>o.trim()), correctIndex:correct });
+    }
   };
 
   return (
@@ -53,31 +76,55 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
             onChange={e=>{setText(e.target.value);setErr("");}} placeholder="Enter question text..."/>
         </div>
         <div className="ad-field" style={{gap:8}}>
-          <label className="ad-label">Section</label>
+          <label className="ad-label">Type</label>
+          <select className="ad-input ad-select" value={type} onChange={e=>setType(e.target.value)}>
+            <option value="mcq">Multiple choice (4 options)</option>
+            <option value="text">Typed answer (exact output)</option>
+          </select>
+          <label className="ad-label" style={{marginTop:6}}>Section</label>
           <select className="ad-input ad-select" value={section} onChange={e=>setSection(e.target.value)}>
-            {sections.map(s=>(
-              <option key={s.name} value={s.name}>{s.displayName}</option>
-            ))}
+            {secOpts.map(s=>(<option key={s.name} value={s.name}>{s.displayName}</option>))}
           </select>
           <label className="ad-label" style={{marginTop:6}}>Marks</label>
           <input type="number" className="ad-input" value={marks} min={1}
             onChange={e=>setMarks(e.target.value)} style={{height:38}}/>
+          <label className="ad-label" style={{marginTop:6}}>Round</label>
+          <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))}>
+            <option value={1}>Round 1 (Aptitude pool)</option>
+            <option value={2}>Round 2 (Technical)</option>
+          </select>
+          {Number(round)===2 && (<>
+            <label className="ad-label" style={{marginTop:6}}>Set</label>
+            <select className="ad-input ad-select" value={set} onChange={e=>setSet(e.target.value)}>
+              <option value="">Select set…</option>
+              <option value="A">Set A</option>
+              <option value="B">Set B</option>
+            </select>
+          </>)}
         </div>
       </div>
-      <div className="ad-qform-opts">
-        {opts.map((o,i)=>(
-          <div key={i} className="ad-opt-row">
-            <button type="button" className={`ad-radio ${correct===i?"ad-radio--on":""}`}
-              onClick={()=>setCorrect(i)} title="Mark as correct answer">
-              {correct===i?"✓":"○"}
-            </button>
-            <input className="ad-input" value={o}
-              onChange={e=>{const n=[...opts];n[i]=e.target.value;setOpts(n);setErr("");}}
-              placeholder={`Option ${i+1}`}/>
-          </div>
-        ))}
-        <p className="ad-hint">Click ✓/○ to mark the correct answer</p>
-      </div>
+      {type==="text" ? (
+        <div className="ad-field" style={{marginTop:4}}>
+          <label className="ad-label">Expected Answer (exact output — case/space insensitive)</label>
+          <input className="ad-input" value={answerText} onChange={e=>{setAnswerText(e.target.value);setErr("");}}
+            placeholder="e.g. 4"/>
+        </div>
+      ) : (
+        <div className="ad-qform-opts">
+          {opts.map((o,i)=>(
+            <div key={i} className="ad-opt-row">
+              <button type="button" className={`ad-radio ${correct===i?"ad-radio--on":""}`}
+                onClick={()=>setCorrect(i)} title="Mark as correct answer">
+                {correct===i?"✓":"○"}
+              </button>
+              <input className="ad-input" value={o}
+                onChange={e=>{const n=[...opts];n[i]=e.target.value;setOpts(n);setErr("");}}
+                placeholder={`Option ${i+1}`}/>
+            </div>
+          ))}
+          <p className="ad-hint">Click ✓/○ to mark the correct answer</p>
+        </div>
+      )}
       {err && <p className="ad-form-err">{err}</p>}
       <div style={{display:"flex",gap:8,marginTop:8}}>
         <button className="ad-btn ad-btn--primary" style={{flex:1}} onClick={save} disabled={saving}>
@@ -629,9 +676,18 @@ function combineDateTime(dateStr, timeStr) {
 
 function toLocalInput(d){ if(!d) return ""; const dt=new Date(d); const p=n=>String(n).padStart(2,"0"); return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`; }
 
+// Round 2 = fed Technical sets A/B. Fixed section structure (questions live in the DB,
+// tagged round:2/set — editable in the Questions tab). One set per candidate, alternating.
+const ROUND2_SECTIONS = [
+  { name:"t_sec_a", displayName:"Section A — Tricky Concept MCQs",          questionCount:10, color:"#4F46E5" },
+  { name:"t_sec_b", displayName:"Section B — Predict the Output",           questionCount:10, color:"#7C3AED" },
+  { name:"t_sec_c", displayName:"Section C — Predict the Output: Advanced", questionCount:10, color:"#0891B2" },
+];
+
 function CreateDriveModal({ sections, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
+  const [round,setRound]=useState(1);
   const [maxCandidates,setMaxCandidates]=useState("");
   const [duration,setDuration]=useState(40);
   const [passing,setPassing]=useState(30);
@@ -650,8 +706,11 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     if(!name.trim()){ setErr("Drive name is required."); return; }
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
     if(driveType==="WALK_IN" && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
-    const chosen=secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
-    if(!chosen.length){ setErr("Select at least one section."); return; }
+    // Round 2 uses the fixed Technical sections; Round 1 uses the chosen pool sections.
+    const chosen = round===2
+      ? ROUND2_SECTIONS
+      : secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
+    if(round!==2 && !chosen.length){ setErr("Select at least one section."); return; }
     if(!date){ setErr("Assessment date is required."); return; }
     const startAt=combineDateTime(date,startTime);
     const endAt=combineDateTime(date,endTime);
@@ -661,7 +720,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     setSaving(true); setErr("");
     try{
       await createAssessment({
-        name:name.trim(), driveType, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
+        name:name.trim(), driveType, round, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
@@ -692,6 +751,11 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
             <div className="ad-field"><label className="ad-label">Drive / Assessment Name</label>
               <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
             <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">Assessment Round</label>
+                <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))}>
+                  <option value={1}>Round 1 — Aptitude pool (existing questions)</option>
+                  <option value={2}>Round 2 — Technical Sets A &amp; B (auto-distributed)</option>
+                </select></div>
               <div className="ad-field"><label className="ad-label">Drive Type</label>
                 <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
                   <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
@@ -742,20 +806,28 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
 
           <section className="ad-card-section">
             <div className="ad-card-section-title">❓ Question Configuration</div>
-            <span className="ad-hint" style={{display:"block",marginBottom:6}}>Sections are drawn from the shared question pool. Tick the sections to include and set the question count.</span>
-            <div className="ad-sec-pick-list">
-              {secs.map((s,i)=>(
-                <div key={s.name} className={`ad-sec-pick ${s.include?"ad-sec-pick--on":""}`}>
-                  <input type="checkbox" checked={s.include} aria-label={`Include ${s.displayName}`}
-                    onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
-                  <span className="ad-sec-pick-name">{s.displayName}</span>
-                  <input type="number" className="ad-input ad-sec-pick-count" value={s.questionCount} min={1} aria-label={`Question count for ${s.displayName}`}
-                    onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
-                  <span className="ad-sec-pick-qs">Qs</span>
-                </div>
-              ))}
-              {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
-            </div>
+            {round===2 ? (
+              <div className="ad-note ad-note--info">
+                <strong>Round 2 — Technical Sets A &amp; B.</strong> Each candidate is automatically given <strong>ONE</strong> set
+                (A or B), alternating between students. Both sets have 30 questions (Section A MCQs + Sections B/C typed-output),
+                50 marks, jumbled within each section. Edit these questions in the <strong>Questions</strong> tab (filter Round 2).
+              </div>
+            ) : (<>
+              <span className="ad-hint" style={{display:"block",marginBottom:6}}>Sections are drawn from the shared question pool. Tick the sections to include and set the question count.</span>
+              <div className="ad-sec-pick-list">
+                {secs.map((s,i)=>(
+                  <div key={s.name} className={`ad-sec-pick ${s.include?"ad-sec-pick--on":""}`}>
+                    <input type="checkbox" checked={s.include} aria-label={`Include ${s.displayName}`}
+                      onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,include:e.target.checked}:x))}/>
+                    <span className="ad-sec-pick-name">{s.displayName}</span>
+                    <input type="number" className="ad-input ad-sec-pick-count" value={s.questionCount} min={1} aria-label={`Question count for ${s.displayName}`}
+                      onChange={e=>setSecs(p=>p.map((x,idx)=>idx===i?{...x,questionCount:e.target.value}:x))}/>
+                    <span className="ad-sec-pick-qs">Qs</span>
+                  </div>
+                ))}
+                {!secs.length && <div className="ad-empty" style={{padding:14}}>No sections found. Add sections under Settings first.</div>}
+              </div>
+            </>)}
           </section>
 
           <section className="ad-card-section">
@@ -1810,6 +1882,8 @@ function Dashboard({ onLogout }) {
     {name:"english",displayName:"English",color:"#0891B2"},
   ]);
   const [qSection,   setQSection]  = useState("");
+  const [qRound,     setQRound]    = useState("");
+  const [qSet,       setQSet]      = useState("");
   const [showAddQ,   setShowAddQ]  = useState(false);
   const [editQ,      setEditQ]     = useState(null);
   const [qSaving,    setQSaving]   = useState(false);
@@ -1844,9 +1918,9 @@ function Dashboard({ onLogout }) {
   },[attPage,attSearch,attStatus,attPassed]);
   const loadQuestions = useCallback(async()=>{
     setLoading(true);
-    try{ const r=await fetchQuestions({section:qSection||undefined});setQuestions(r.data.data); }
+    try{ const r=await fetchQuestions({section:qSection||undefined, round:qRound||undefined, set:qSet||undefined});setQuestions(r.data.data); }
     catch{}finally{setLoading(false);}
-  },[qSection]);
+  },[qSection,qRound,qSet]);
   const loadSettings = useCallback(async()=>{
     try{
       const r=await fetchSettings();
@@ -1865,7 +1939,7 @@ function Dashboard({ onLogout }) {
   },[tab]);
   useEffect(()=>{ if(tab==="students")  loadUsers(); },[userPage,userSearch,userStatus,userMin]);
   useEffect(()=>{ if(tab==="attempts")  loadAttempts(); },[attPage,attSearch,attStatus,attPassed]);
-  useEffect(()=>{ if(tab==="questions") loadQuestions(); },[qSection]);
+  useEffect(()=>{ if(tab==="questions") loadQuestions(); },[qSection,qRound,qSet]);
 
   const handleAddQ  = async(d)=>{ setQSaving(true);try{await addQuestion(d);await loadQuestions();setShowAddQ(false);}catch(e){alert(e.message);}finally{setQSaving(false);} };
   const handleEditQ = async(d)=>{ setQSaving(true);try{await updateQuestion(editQ._id,d);await loadQuestions();setEditQ(null);}catch(e){alert(e.message);}finally{setQSaving(false);} };
@@ -2099,12 +2173,24 @@ function Dashboard({ onLogout }) {
               {!showAddQ&&!editQ&&<button className="ad-btn ad-btn--primary" onClick={()=>setShowAddQ(true)}>+ Add Question</button>}
             </div>
             <div className="ad-toolbar">
+              <select className="ad-select" value={qRound} onChange={e=>{setQRound(e.target.value);setQSection("");if(e.target.value!=="2")setQSet("");}}>
+                <option value="">All Rounds</option>
+                <option value="1">Round 1 (Aptitude pool)</option>
+                <option value="2">Round 2 (Technical Sets A/B)</option>
+              </select>
+              {qRound==="2" && (
+                <select className="ad-select" value={qSet} onChange={e=>setQSet(e.target.value)}>
+                  <option value="">All Sets (A + B)</option>
+                  <option value="A">Set A</option>
+                  <option value="B">Set B</option>
+                </select>
+              )}
               <select className="ad-select" value={qSection} onChange={e=>setQSection(e.target.value)}>
                 <option value="">All Sections</option>
-                {allSections.map(s=><option key={s.name} value={s.name}>{s.displayName}</option>)}
+                {(qRound==="2"?TECH_SECTION_OPTS:allSections).map(s=><option key={s.name} value={s.name}>{s.displayName}</option>)}
               </select>
               <div className="ad-q-counts">
-                {allSections.map((s,i)=>(
+                {(qRound==="2"?TECH_SECTION_OPTS:allSections).map((s,i)=>(
                   <span key={s.name} className="ad-q-count-pill" style={{background:sectionColor(s,i)+"22",color:sectionColor(s,i),border:`1px solid ${sectionColor(s,i)}44`}}>
                     {s.displayName}: {questions.filter(q=>q.section===s.name).length}
                   </span>
@@ -2136,13 +2222,20 @@ function Dashboard({ onLogout }) {
                           <button className="ad-btn ad-btn--sm ad-btn--danger"  onClick={()=>handleDelQ(q._id)}>Delete</button>
                         </div>
                       </div>
-                      <div className="ad-q-opts">
-                        {(q.options||[]).map((o,oi)=>(
-                          <div key={oi} className={`ad-q-opt ${oi===q.correctIndex?"ad-q-opt--correct":""}`}>
-                            {oi===q.correctIndex?"✓ ":""}{o}
-                          </div>
-                        ))}
-                      </div>
+                      {q.type==="text" ? (
+                        <div className="ad-q-opts">
+                          <div className="ad-q-opt ad-q-opt--correct">✓ Answer: {q.answerText}</div>
+                          <div className="ad-q-opt" style={{opacity:.7}}>Typed-answer question{q.round===2&&q.set?` · Round 2 · Set ${q.set}`:""}</div>
+                        </div>
+                      ) : (
+                        <div className="ad-q-opts">
+                          {(q.options||[]).map((o,oi)=>(
+                            <div key={oi} className={`ad-q-opt ${oi===q.correctIndex?"ad-q-opt--correct":""}`}>
+                              {oi===q.correctIndex?"✓ ":""}{o}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   }
                 </div>

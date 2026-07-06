@@ -35,8 +35,8 @@ const progressSchema = new mongoose.Schema({
   questionOrder:   { type: [String], default: undefined },          // question _id strings, shuffled
   // questionId -> array of original option indexes in shuffled display order
   optionOrder:     { type: Map, of: [Number], default: undefined },
-  // questionId -> selected DISPLAY option index (mapped to original at scoring time)
-  answers:         { type: Map, of: Number, default: undefined },
+  // questionId -> answer. MCQ: selected DISPLAY option index (Number). Text: typed string.
+  answers:         { type: Map, of: mongoose.Schema.Types.Mixed, default: undefined },
   review:          { type: [String], default: undefined },  // qids marked for review
   visited:         { type: [String], default: undefined },  // qids the candidate has opened
   remainingSeconds:{ type: Number },
@@ -123,6 +123,10 @@ const candidateSchema = new mongoose.Schema({
   thankYouEmailSentAt:        { type: Date },
   disqualificationEmailSentAt:{ type: Date },
 
+  // Round-2 set assignment (A/B) — fixed once per candidate so resume shows the same
+  // paper and each student gets exactly ONE set (alternating distribution).
+  assignedSet: { type: String, default: null },
+
   // In-flight progress (for accidental-exit recovery / resume)
   progress: { type: progressSchema, default: undefined },
 
@@ -157,6 +161,8 @@ const candidateSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Compound indexes for the admin drive dashboard (college + assessment + status filters)
+candidateSchema.index({ assessmentId: 1, createdAt: -1 }); // list/export sort (avoids 32MB in-memory sort)
+candidateSchema.index({ createdAt: -1 });                  // global candidate list sort
 candidateSchema.index({ assessmentId: 1, college: 1, status: 1 });
 candidateSchema.index({ assessmentId: 1, status: 1 });
 candidateSchema.index({ assessmentId: 1, score: -1 });

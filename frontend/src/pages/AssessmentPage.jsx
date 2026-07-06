@@ -1115,12 +1115,20 @@ export default function AssessmentPage() {
 
   const go = (idx) => { if (idx >= 0 && idx < questions.length) setCurQ(idx); };
   const setAns = (i) => setAnswers(a => ({ ...a, [q.id]: i }));
+  // Typed-answer (round-2 text questions): store the raw string; empty = unanswered.
+  const setTextAns = (v) => setAnswers(a => { const n = { ...a }; if (String(v).trim() === "") delete n[q.id]; else n[q.id] = v; return n; });
   const clearAns = () => setAnswers(a => { const n = { ...a }; delete n[q.id]; return n; });
+  // Mark for Review is a true toggle now — clicking again un-marks it.
   const toggleReviewNext = () => {
-    setReview(r => { const n = new Set(r); n.add(q.id); return n; });
+    setReview(r => { const n = new Set(r); n.has(q.id) ? n.delete(q.id) : n.add(q.id); return n; });
     setTimeout(() => go(curQ + 1), 0);
   };
-  const saveNext = () => go(curQ + 1);
+  // Save & Next finalises the answer → clears any "review" mark so the palette
+  // dot turns Answered (green) instead of staying Answered & Review (purple).
+  const saveNext = () => {
+    setReview(r => { if (!r.has(q.id)) return r; const n = new Set(r); n.delete(q.id); return n; });
+    go(curQ + 1);
+  };
 
   // Submission summary
   const answeredCount  = Object.keys(answers).length;
@@ -1234,19 +1242,30 @@ export default function AssessmentPage() {
             <div className="qp-q-panel-head">
               <div className="qp-q-sec-badge">{curSection?.label} · Q{curSection ? curSection.idxs.indexOf(curQ) + 1 : curQ + 1}</div>
             </div>
-            <div className="qp-q-text">{q?.text}</div>
-            <div className="qp-opts">
-              {(q?.options || []).map((opt, i) => {
-                const sel = answers[q.id] === i;
-                return (
-                  <div key={i} className={`qp-opt ${sel ? "qp-opt--sel" : ""}`} onClick={() => setAns(i)}>
-                    <div className={`qp-opt-letter ${sel ? "qp-opt-letter--sel" : ""}`}>{OPTS[i]}</div>
-                    <span className="qp-opt-text">{opt}</span>
-                    {sel && <div className="qp-opt-check">✓</div>}
-                  </div>
-                );
-              })}
-            </div>
+            <div className="qp-q-text" style={{ whiteSpace: "pre-wrap" }}>{q?.text}</div>
+            {q?.type === "text" ? (
+              // Round-2 typed-answer question — no options; candidate types the exact output.
+              <div className="qp-text-answer">
+                <label className="qp-text-label">Type the exact output / answer:</label>
+                <input className="qp-text-input" type="text" value={answers[q.id] ?? ""}
+                  placeholder="Type your answer here…" autoComplete="off" spellCheck={false}
+                  onChange={(e) => setTextAns(e.target.value)} />
+                <span className="qp-text-hint">Enter your answer exactly. Spacing and case are ignored during evaluation.</span>
+              </div>
+            ) : (
+              <div className="qp-opts">
+                {(q?.options || []).map((opt, i) => {
+                  const sel = answers[q.id] === i;
+                  return (
+                    <div key={i} className={`qp-opt ${sel ? "qp-opt--sel" : ""}`} onClick={() => setAns(i)}>
+                      <div className={`qp-opt-letter ${sel ? "qp-opt-letter--sel" : ""}`}>{OPTS[i]}</div>
+                      <span className="qp-opt-text">{opt}</span>
+                      {sel && <div className="qp-opt-check">✓</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="asmt-actions">
