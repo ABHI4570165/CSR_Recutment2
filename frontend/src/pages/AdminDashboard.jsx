@@ -19,6 +19,31 @@ const fmtDate = d => d ? new Date(d).toLocaleDateString("en-IN",{day:"numeric",m
 const fmtDateTime = d => d ? new Date(d).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}) : "—";
 const fmtTimeOnly = d => d ? new Date(d).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}) : "—";
 const fmtSecs = s => { if(s==null) return "—"; const m=Math.floor(s/60); return `${m}m ${s%60}s`; };
+const mmss = s => { const m=Math.floor(s/60), ss=s%60; return `${m}:${String(ss).padStart(2,"0")}`; };
+
+// Live "Time Left" cell for the candidates table. Self-ticks every second so the
+// countdown moves without re-fetching. Mirrors the backend's authoritative calc:
+// remaining = durationMinutes*60 − (now − startedAt).  (backend: remainingSeconds())
+function TimeLeftCell({ candidate: c, durationMinutes }) {
+  const [, force] = useState(0);
+  const active = (c.status === "started" || c.status === "in-progress") && c.startedAt;
+  useEffect(() => {
+    if (!active) return;
+    const iv = setInterval(() => force(n => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, [active]);
+
+  if (c.status === "completed") return <span style={{fontSize:12,color:"#059669",fontWeight:700}}>✓ Done</span>;
+  if (c.status === "disqualified" || c.status === "timed-out") return <span style={{fontSize:12,color:"#DC2626"}}>—</span>;
+  if (!active) return <span style={{fontSize:12,color:"#94A3B8"}}>—</span>;
+
+  const total = (durationMinutes || 40) * 60;
+  const elapsed = Math.floor((Date.now() - new Date(c.startedAt).getTime()) / 1000);
+  const left = Math.max(0, total - elapsed);
+  if (left <= 0) return <span style={{fontSize:12,color:"#DC2626",fontWeight:700}}>⏳ Time up</span>;
+  const color = left <= 120 ? "#DC2626" : left <= 300 ? "#D97706" : "#0F766E";
+  return <span className="ad-mono" style={{fontSize:13,fontWeight:700,color}} title="Time remaining (live)">⏱ {mmss(left)}</span>;
+}
 
 // Generate a color from a section name (for sections without defined color)
 const PALETTE = ["#4F46E5","#7C3AED","#0891B2","#059669","#D97706","#DC2626","#0D9488","#7C3AED","#BE185D","#1D4ED8"];
@@ -1408,7 +1433,7 @@ function DrivesTab() {
         {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
         :cands.length===0?<div className="ad-empty">{isWalkIn?"No candidates registered yet. Share the test portal link.":"No candidates yet. Click \"Upload Candidates\"."}</div>
         :<table className="ad-table">
-          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Source</th><th>Status</th>{!isWalkIn&&<th>Shortlist</th>}{!isWalkIn&&<th>Link</th>}<th>Score</th><th>Viol.</th><th>Actions</th><th></th></tr></thead>
+          <thead><tr><th></th><th>#</th><th>Name</th><th>College</th><th>Source</th><th>Status</th><th>Time Left</th>{!isWalkIn&&<th>Shortlist</th>}{!isWalkIn&&<th>Link</th>}<th>Score</th><th>Viol.</th><th>Actions</th><th></th></tr></thead>
           <tbody>{cands.map((c,i)=>{
             const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
             const walkIn=c.candidateSource==="WALK_IN";
@@ -1424,6 +1449,7 @@ function DrivesTab() {
                   {c.status==="disqualified"&&c.terminationReason&&<div style={{fontSize:11,color:"#DC2626",marginTop:3}}>⛔ {c.terminationReason}</div>}
                   {c.geo&&c.geo.inside!=null&&<div style={{fontSize:11,color:c.geo.inside?"#059669":"#DC2626",marginTop:2}}>📍 {c.geo.inside?"Inside":"Outside"}{c.geo.distance!=null?` · ${c.geo.distance}m`:""}</div>}
                 </td>
+                <td><TimeLeftCell candidate={c} durationMinutes={sel?.durationMinutes}/></td>
                 {!isWalkIn&&<td className="ad-td-sm">{c.shortlistEmail?.status||"—"}</td>}
                 {!isWalkIn&&<td className="ad-td-sm">{c.emailStatus}</td>}
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
