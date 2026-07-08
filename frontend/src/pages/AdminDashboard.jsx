@@ -629,13 +629,41 @@ function SecurityToggles({ value, onChange, config, onConfigChange }) {
   const cfg = { ...DEFAULT_SEC_CONFIG, ...(config || {}), location: { ...DEFAULT_SEC_CONFIG.location, ...((config || {}).location || {}) } };
   const setCfg = (patch) => onConfigChange({ ...cfg, ...patch });
   const setLoc = (patch) => onConfigChange({ ...cfg, location: { ...cfg.location, ...patch } });
+  const [locating, setLocating] = useState(false);
+  const [accuracy, setAccuracy] = useState(null);
+  // Browser geolocation on a laptop/desktop (no GPS) returns a WiFi/IP fix that
+  // is often off by 100s of metres. Instead of taking the first (worst) reading,
+  // watch for ~12s and keep the most ACCURATE fix; GPS-equipped devices refine
+  // over time. Show the accuracy and warn when it's clearly imprecise.
   const useCurrentLocation = () => {
     if (!navigator.geolocation) { alert("Geolocation not supported by this browser."); return; }
-    navigator.geolocation.getCurrentPosition(
-      (p) => setLoc({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }),
-      (e) => alert("Could not get location: " + e.message),
-      { enableHighAccuracy: true, timeout: 10000 }
+    setLocating(true); setAccuracy(null);
+    let best = null, id = null, done = false;
+    const started = Date.now();
+    const finish = () => {
+      if (done) return; done = true;
+      if (id != null) navigator.geolocation.clearWatch(id);
+      setLocating(false);
+      if (best) {
+        setLoc({ lat: best.lat, lng: best.lng });
+        if (best.acc > 100) {
+          alert(`Location captured, but accuracy is only ±${Math.round(best.acc)} m — this device likely has no GPS.\n\nFor an exact point either:\n• Open this admin page on your phone and tap "Use My Current Location", or\n• Get the coordinates from Google Maps (right-click the exact spot → click the lat, lng at the top to copy) and paste them into the Latitude/Longitude fields.`);
+        }
+      }
+    };
+    id = navigator.geolocation.watchPosition(
+      (p) => {
+        const acc = p.coords.accuracy;
+        if (!best || acc < best.acc) {
+          best = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc };
+          setAccuracy(Math.round(acc));
+        }
+        if (acc <= 20 || Date.now() - started > 12000) finish();   // good enough or time's up
+      },
+      (e) => { finish(); if (!best) alert("Could not get location: " + e.message); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+    setTimeout(finish, 13000);   // hard stop
   };
   const numField = (label, key, min = 0) => (
     <div className="ad-field">
@@ -684,8 +712,13 @@ function SecurityToggles({ value, onChange, config, onConfigChange }) {
           </div>
           <div className="ad-field" style={{marginTop:8}}><label className="ad-label">Location Label (optional)</label>
             <input className="ad-input" value={cfg.location.label} placeholder="e.g. RVCE Main Block" onChange={e=>setLoc({label:e.target.value})}/></div>
-          <button type="button" className="ad-btn ad-btn--outline ad-btn--sm" style={{marginTop:8}} onClick={useCurrentLocation}>📍 Use My Current Location</button>
-          {cfg.location.lat!=null && <span style={{fontSize:12,color:"var(--text-3)",marginLeft:10}}>Set: {cfg.location.lat}, {cfg.location.lng}</span>}
+          <button type="button" className="ad-btn ad-btn--outline ad-btn--sm" style={{marginTop:8}} onClick={useCurrentLocation} disabled={locating}>
+            {locating ? `📡 Locating…${accuracy!=null?` (±${accuracy} m, refining)`:""}` : "📍 Use My Current Location"}
+          </button>
+          {cfg.location.lat!=null && !locating && <span style={{fontSize:12,color:"var(--text-3)",marginLeft:10}}>Set: {cfg.location.lat}, {cfg.location.lng}{accuracy!=null?` · ±${accuracy} m`:""}</span>}
+          <div style={{fontSize:11.5,color:"var(--text-3)",marginTop:8,lineHeight:1.5}}>
+            💡 On a laptop the location can be off by 100s of metres (no GPS). For an exact point, use your <strong>phone</strong>, or copy the coordinates from <strong>Google Maps</strong> (right-click the spot → click the lat, lng to copy) and paste above. Increase the <strong>radius</strong> if candidates report being marked outside.
+          </div>
         </div>
       )}
     </div>
