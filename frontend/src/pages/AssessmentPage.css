@@ -257,3 +257,20 @@
 }
 .qp-text-input:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
 .qp-text-hint { font-size: 12px; color: var(--asmt-muted, #6b7280); }
+
+/* Monospace code block for coding / SQL questions — preserves indentation and
+   scrolls horizontally for long lines instead of wrapping (keeps code readable). */
+.qp-code {
+  font-family: ui-monospace, "Cascadia Code", "Consolas", "Courier New", monospace;
+  white-space: pre;
+  overflow-x: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  tab-size: 4;
+}

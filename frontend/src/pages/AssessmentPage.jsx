@@ -1242,7 +1242,22 @@ export default function AssessmentPage() {
             <div className="qp-q-panel-head">
               <div className="qp-q-sec-badge">{curSection?.label} · Q{curSection ? curSection.idxs.indexOf(curQ) + 1 : curQ + 1}</div>
             </div>
-            <div className="qp-q-text" style={{ whiteSpace: "pre-wrap" }}>{q?.text}</div>
+            {(() => {
+              const text = q?.text || "";
+              // Multi-line questions are code/SQL — render the code part in a monospace
+              // block so indentation lines up. A leading "prompt:" line stays as normal text.
+              if (!text.includes("\n")) return <div className="qp-q-text" style={{ whiteSpace: "pre-wrap" }}>{text}</div>;
+              const nl = text.indexOf("\n");
+              const first = text.slice(0, nl);
+              const rest = text.slice(nl + 1);
+              const promptIsHeading = /[:：]\s*$/.test(first);
+              return (
+                <div className="qp-q-text">
+                  {promptIsHeading && <div style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{first}</div>}
+                  <pre className="qp-code">{promptIsHeading ? rest : text}</pre>
+                </div>
+              );
+            })()}
             {q?.type === "text" ? (
               // Round-2 typed-answer question — no options; candidate types the exact output.
               <div className="qp-text-answer">

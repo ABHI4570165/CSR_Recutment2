@@ -9,12 +9,25 @@ const path = require("path");
 
 function paragraphs(documentXmlPath) {
   const xml = fs.readFileSync(documentXmlPath, "utf8");
+  const decode = (s) => s
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
   return xml.split(/<\/w:p>/).map((p) => {
-    const runs = [...p.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]);
-    return runs.join("")
-      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-      .trim();
-  }).filter(Boolean);
+    // Walk text runs AND line breaks in document order so multi-line code keeps
+    // its line breaks: <w:br/> / <w:cr/> → newline, <w:tab/> → tab. Preserving
+    // these is what makes code/SQL render on separate, indented lines for students.
+    let out = "";
+    const re = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<w:br\b[^>]*\/?>|<w:cr\b[^>]*\/?>|<w:tab\b[^>]*\/?>/g;
+    let m;
+    while ((m = re.exec(p)) !== null) {
+      if (m[1] !== undefined) out += decode(m[1]);   // text run (keeps leading spaces = indentation)
+      else if (/<w:tab/.test(m[0])) out += "\t";      // tab
+      else out += "\n";                                // <w:br/> or <w:cr/>
+    }
+    return out
+      .replace(/[ \t]+\n/g, "\n")   // drop trailing spaces before a newline
+      .replace(/^\n+/, "")           // drop leading blank lines
+      .replace(/\s+$/, "");          // drop trailing whitespace/newlines (keep internal indentation)
+  }).filter((s) => s.trim());
 }
 
 // Parse one document's paragraphs into questions. `set` = "A" | "B".
