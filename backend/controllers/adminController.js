@@ -2,6 +2,8 @@ const User        = require("../models/User");
 const QuizAttempt = require("../models/QuizAttempt");
 const QuizConfig  = require("../models/QuizConfig");
 const Question    = require("../models/Question");
+const Candidate   = require("../models/Candidate");
+const Assessment  = require("../models/Assessment");
 const { cacheGet, cacheSet, cacheDel } = require("../utils/redis");
 const { refreshCache } = require("./quizController");
 
@@ -285,14 +287,28 @@ exports.getCutoffPreview = async (req, res) => {
     }
     const page  = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100000, parseInt(req.query.limit) || 500);
-    const filter = { quizCompleted:true, score:{ $gte:cutoff } };
-    const [users, total, topDoc] = await Promise.all([
-      User.find(filter)
-        .select("name email college rollNo phone score totalMarks createdAt")
+    // Cutoff now runs against drive candidates (Candidate collection). Optionally
+    // scope to one drive via ?assessmentId — recommended, since different drives
+    // are different tests with different max marks.
+    const base = { status: "completed" };
+    if (req.query.assessmentId) base.assessmentId = req.query.assessmentId;
+    const filter = { ...base, score: { $gte: cutoff } };
+    const [cands, total, topDoc] = await Promise.all([
+      Candidate.find(filter)
+        .select("name email college usn phone score totalMarks assessmentId createdAt")
         .sort({ score:-1 }).skip((page-1)*limit).limit(limit).lean(),
-      User.countDocuments(filter),
-      User.findOne({ quizCompleted:true }).sort({ score:-1 }).select("score").lean(),
+      Candidate.countDocuments(filter),
+      Candidate.findOne(base).sort({ score:-1 }).select("score").lean(),
     ]);
+    const ids = [...new Set(cands.map(c => String(c.assessmentId)))];
+    const driveNames = {};
+    (await Assessment.find({ _id: { $in: ids } }).select("name").lean())
+      .forEach(d => { driveNames[String(d._id)] = d.name; });
+    const users = cands.map(c => ({
+      _id: c._id, name: c.name, email: c.email, college: c.college,
+      rollNo: c.usn || "", phone: c.phone || "", score: c.score, totalMarks: c.totalMarks,
+      drive: driveNames[String(c.assessmentId)] || "", createdAt: c.createdAt,
+    }));
     res.json({ success:true, data:{ users, total, cutoff, topScore:topDoc?.score||0, pages:Math.ceil(total/limit), page } });
   } catch (err) {
     console.error("getCutoffPreview:", err);

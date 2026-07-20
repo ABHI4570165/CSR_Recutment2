@@ -87,21 +87,27 @@ export default function WalkInPortal() {
     setErr(""); setFieldErr((fe) => ({ ...fe, resume: "" }));
   };
 
+  // Round 2 drives collect only Name, Email and Mobile — no college/USN/Aadhaar/resume.
+  const isRound2 = Number(drive?.round) === 2;
+
   const validate = () => {
     const fe = {};
-    // All these are mandatory.
-    ["name", "usn", "course", "branch", "college", "gender", "dob", "location"].forEach((k) => {
-      if (!String(form[k] || "").trim()) fe[k] = "Required";
-    });
+    if (!String(form.name || "").trim()) fe.name = "Required";
     if (!form.email.trim()) fe.email = "Required";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) fe.email = "Enter a valid email address";
     if (!form.phone.trim()) fe.phone = "Required";
     else if (!PHONE_RE.test(form.phone.replace(/\s/g, ""))) fe.phone = "Enter a 10-digit mobile number";
-    if (!form.aadhaar.trim()) fe.aadhaar = "Required";
-    else if (!AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "Enter a 12-digit Aadhaar number";
-    if (form.dob && new Date(form.dob) > new Date()) fe.dob = "Date of birth cannot be in the future";
     if (!form.testCode.trim()) fe.testCode = "Required";
-    if (!resume) fe.resume = "Resume is required (PDF, DOC or DOCX)";
+    if (!isRound2) {
+      // Full first-round form: the rest are mandatory too.
+      ["usn", "course", "branch", "college", "gender", "dob", "location"].forEach((k) => {
+        if (!String(form[k] || "").trim()) fe[k] = "Required";
+      });
+      if (!form.aadhaar.trim()) fe.aadhaar = "Required";
+      else if (!AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "Enter a 12-digit Aadhaar number";
+      if (form.dob && new Date(form.dob) > new Date()) fe.dob = "Date of birth cannot be in the future";
+      if (!resume) fe.resume = "Resume is required (PDF, DOC or DOCX)";
+    }
     return fe;
   };
 
@@ -217,13 +223,18 @@ export default function WalkInPortal() {
               </div>
 
               <div className="wp-grid">
-                {FIELDS.filter(f => f[0] !== "testCode").map(inputFor)}
-                <div className="wp-field wp-field--full">
-                  <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
-                  <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
-                  {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
-                  {fieldErr.resume && <span className="wp-field-err">{fieldErr.resume}</span>}
-                </div>
+                {(isRound2
+                  ? FIELDS.filter(f => ["name", "email", "phone"].includes(f[0]))
+                  : FIELDS.filter(f => f[0] !== "testCode")
+                ).map(inputFor)}
+                {!isRound2 && (
+                  <div className="wp-field wp-field--full">
+                    <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
+                    <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />
+                    {resume && <span className="wp-field-err" style={{ color: "#059669" }}>✓ {resume.filename} attached</span>}
+                    {fieldErr.resume && <span className="wp-field-err">{fieldErr.resume}</span>}
+                  </div>
+                )}
               </div>
 
               <label className="wp-tnc">

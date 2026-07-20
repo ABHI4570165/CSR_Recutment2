@@ -316,7 +316,10 @@ exports.scheduleEmails = async (req, res) => {
 exports.listCandidates = async (req, res) => {
   try {
     const page   = Math.max(1, parseInt(req.query.page) || 1);
-    const limit  = Math.min(500, parseInt(req.query.limit) || 20);
+    // Cap high enough for full-drive / all-candidates exports (limit=99999) to
+    // return everyone. The list omits resume base64 (select below), so a large
+    // page stays light. The paginated table still passes limit=20.
+    const limit  = Math.min(100000, parseInt(req.query.limit) || 20);
     const { assessmentId, college, status, search, source, minScore } = req.query;
 
     const filter = {};

@@ -32,6 +32,7 @@ function publicDrive(d) {
   return {
     assessmentName: d.name,
     durationMinutes: d.durationMinutes,
+    round: Number(d.round) || 1,   // 2 → walk-in form collects only name/email/mobile
     college: d.college || "",
     colleges: Array.isArray(d.colleges) ? d.colleges : [],   // walk-in college dropdown options
     startAt: d.startAt || null,
@@ -123,17 +124,26 @@ exports.registerWalkIn = async (req, res) => {
     const b = req.body || {};
     const name = String(b.name || "").trim();
     const email = String(b.email || "").trim().toLowerCase();
-    const college = String(b.college || "").trim();
     if (!name) return res.status(400).json({ success: false, message: "Full name is required." });
     if (!isEmail(email)) return res.status(400).json({ success: false, message: "A valid email is required." });
-    if (!college) return res.status(400).json({ success: false, message: "College name is required." });
-
-    const parsedResume = parseResume(b.resume);
-    if (parsedResume && parsedResume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 5 MB)." });
 
     const r = await findOpenWalkInDrive(b.testCode);
     if (r.error) return res.status(r.code).json({ success: false, message: r.error });
     const drive = r.drive;
+
+    // Round 2 collects only name, email and mobile. Round 1 keeps the full form.
+    const isRound2 = Number(drive.round) === 2;
+    const phone = String(b.phone || "").trim();
+    let college = String(b.college || "").trim();
+    if (isRound2) {
+      if (!/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: "A valid 10-digit mobile number is required." });
+      if (!college) college = "—";   // Candidate model requires a college; placeholder for round 2
+    } else if (!college) {
+      return res.status(400).json({ success: false, message: "College name is required." });
+    }
+
+    const parsedResume = isRound2 ? undefined : parseResume(b.resume);
+    if (parsedResume && parsedResume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 5 MB)." });
 
     // ── RE-ENTRY / RESUME ──────────────────────────────────────────────────────
     // If this person already registered for this drive (matched by email OR Aadhaar)
@@ -179,7 +189,7 @@ exports.registerWalkIn = async (req, res) => {
         name, email, college,
         candidateSource: "WALK_IN",
         isTestCandidate: process.env.TEST_MODE === "true",   // tag load-test rows for safe cleanup
-        usn: b.usn, phone: b.phone, gender: b.gender, dob: b.dob, aadhaar: b.aadhaar, location: b.location,
+        usn: b.usn, phone, gender: b.gender, dob: b.dob, aadhaar: b.aadhaar, location: b.location,
         course: b.course, branch: b.branch,
         ...(resume ? { resume } : {}),
         token,

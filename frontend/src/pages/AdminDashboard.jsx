@@ -416,6 +416,9 @@ function CutoffTab() {
   const [preview,   setPreview]   = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [confirming,setConfirming]= useState(false);
+  const [drives,    setDrives]    = useState([]);
+  const [assessmentId, setAssessmentId] = useState("");   // "" = all drives
+  useEffect(()=>{ (async()=>{ try{ const r=await fetchAssessments(); setDrives(r.data.data||[]); }catch{} })(); },[]);
   const [exporting, setExporting] = useState(false);
   const [page,      setPage]      = useState(1);
   const [err,       setErr]       = useState("");
@@ -425,7 +428,7 @@ function CutoffTab() {
     if (isNaN(c)||c<0) { setErr("Please enter a valid cutoff score."); return; }
     setErr(""); setLoading(true);
     try {
-      const res = await fetchCutoff({ cutoff:c, page:pg, limit:500 });
+      const res = await fetchCutoff({ cutoff:c, page:pg, limit:500, assessmentId:assessmentId||undefined });
       setPreview(res.data.data); setPage(pg);
     } catch(e) { setErr(e.message||"Failed to load."); }
     finally { setLoading(false); }
@@ -441,7 +444,7 @@ function CutoffTab() {
 
       // Fetch all pages to get all students
       while (hasMore) {
-        const res = await fetchCutoff({ cutoff:cutoffValue, page:currentPage, limit:100000 });
+        const res = await fetchCutoff({ cutoff:cutoffValue, page:currentPage, limit:100000, assessmentId:assessmentId||undefined });
         const users = res.data.data.users || [];
         allUsers = allUsers.concat(users);
         
@@ -457,11 +460,11 @@ function CutoffTab() {
       // Format and export to Excel
       const rows = allUsers;
       const ws = XLSX.utils.json_to_sheet(rows.map((u,i)=>({
-        "#":i+1, Name:u.name, Email:u.email, College:u.college,
-        "Roll No":u.rollNo, Phone:u.phone, Score:u.score, "Total Marks":u.totalMarks,
-        Registered:fmtDate(u.createdAt),
+        "#":i+1, Name:u.name, Email:u.email, College:u.college, Drive:u.drive||"",
+        USN:u.rollNo, Phone:u.phone, Score:u.score, "Total Marks":u.totalMarks,
+        Completed:fmtDate(u.createdAt),
       })));
-      ws["!cols"]=[6,22,28,22,14,14,8,12,14].map(w=>({wch:w}));
+      ws["!cols"]=[6,22,28,22,26,14,14,8,12,14].map(w=>({wch:w}));
       const wb=XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb,ws,`Cutoff_${cutoff}`);
       XLSX.writeFile(wb,`MHA_Cutoff_${cutoff}_Students.xlsx`);
@@ -481,10 +484,16 @@ function CutoffTab() {
             <input type="number" className="ad-input" style={{width:160}} placeholder="e.g. 30" value={cutoff}
               onChange={e=>{setCutoff(e.target.value);setPreview(null);setErr("");}}
               onKeyDown={e=>e.key==="Enter"&&loadPreview(1)}/>
+            <select className="ad-select" style={{minWidth:220}} value={assessmentId}
+              onChange={e=>{setAssessmentId(e.target.value);setPreview(null);}}>
+              <option value="">All Drives</option>
+              {drives.map(d=><option key={d._id} value={d._id}>{d.name}</option>)}
+            </select>
             <button className="ad-btn ad-btn--primary" onClick={()=>loadPreview(1)} disabled={loading||!cutoff}>
               {loading?<><Spinner/>Loading…</>:"Preview Results"}
             </button>
           </div>
+          <span className="ad-hint">Cutoff now runs on your drive candidates. Pick a drive, or leave “All Drives” to filter everyone across drives.</span>
           {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
         </div>
       </div>
@@ -513,13 +522,13 @@ function CutoffTab() {
                 : <>
                     <div className="ad-table-wrap" style={{marginBottom:10}}>
                       <table className="ad-table">
-                        <thead><tr><th>#</th><th>Name</th><th>Roll No</th><th>College</th><th>Score</th><th>Total</th></tr></thead>
+                        <thead><tr><th>#</th><th>Name</th><th>College</th><th>Drive</th><th>Score</th><th>Total</th></tr></thead>
                         <tbody>{preview.users.map((u,i)=>(
                           <tr key={u._id}>
                             <td className="ad-td-num">{(page-1)*50+i+1}</td>
                             <td><div className="ad-td-name"><div className="ad-avatar">{u.name.charAt(0)}</div>{u.name}</div></td>
-                            <td><span className="ad-mono">{u.rollNo}</span></td>
                             <td className="ad-td-sm">{u.college}</td>
+                            <td className="ad-td-sm">{u.drive||"—"}</td>
                             <td><strong style={{color:"#4F46E5",fontSize:15}}>{u.score}</strong></td>
                             <td className="ad-td-sm">{u.totalMarks}</td>
                           </tr>
@@ -763,7 +772,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
-    if(driveType==="WALK_IN" && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
+    if(driveType==="WALK_IN" && round!==2 && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
     // Round 2 uses the fixed Technical sections; Round 1 uses the chosen pool sections.
     const chosen = round===2
       ? ROUND2_SECTIONS
@@ -787,7 +796,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
         colleges:collegesArr,
         security, securityConfig:secConfig,
       });
-      onCreated();
+      onCreated(round);
     }catch(e){ setErr(e.message||"Failed to create."); }
     finally{ setSaving(false); }
   };
@@ -831,10 +840,13 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
               <div className="ad-field"><label className="ad-label">Passing Score (internal)</label>
                 <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
             </div>
-            {driveType==="WALK_IN" && (
+            {driveType==="WALK_IN" && round!==2 && (
               <div className="ad-field" style={{marginTop:12}}><label className="ad-label">Colleges — one per line (students pick from this dropdown)</label>
                 <textarea className="ad-input ad-textarea" rows={4} value={collegesText} placeholder={"RV College of Engineering\nBMS College of Engineering\nPES University"} onChange={e=>setCollegesText(e.target.value)}/>
                 <span className="ad-hint">Candidates can only select from these — they can't type their own college.</span></div>
+            )}
+            {driveType==="WALK_IN" && round===2 && (
+              <div className="ad-note" style={{marginTop:12,fontSize:12.5}}>ℹ️ Round 2 collects only Name, Email &amp; Mobile — no college list needed.</div>
             )}
           </section>
 
@@ -1124,6 +1136,7 @@ function DrivesTab() {
   const [resumeView,setResumeView]=useState(null); // candidate whose resume is open
   const [profileCand,setProfileCand]=useState(null); // candidate whose profile dialog is open
   const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
+  const [roundFilter,setRoundFilter]=useState("1");      // "1" First Round | "2" Second Round
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
   const [toast,setToast]=useState(null);   // {type:'success'|'error', title, lines:[]}
@@ -1286,19 +1299,38 @@ function DrivesTab() {
   if(!sel) return (
     <div>
       {toastEl}{confirmEl}
-      {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={()=>{setShowCreate(false);loadDrives();}}/>}
+      {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
         {!isViewer() && <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>}
+      </div>
+      {/* Round split — First Round holds every existing/legacy drive (round 1 or unset); Second Round holds drives created as round 2. */}
+      <div className="ad-round-tabs" style={{display:"flex",gap:8,marginBottom:12,borderBottom:"2px solid var(--border)",paddingBottom:2}}>
+        {[["1","🎯 First Round"],["2","🚀 Second Round"]].map(([v,l])=>{
+          const count=drives.filter(d=>(Number(d.round)||1)===Number(v)).length;
+          const on=roundFilter===v;
+          return (
+            <button key={v} onClick={()=>setRoundFilter(v)}
+              style={{border:"none",background:"none",cursor:"pointer",padding:"8px 14px",fontSize:14,
+                fontWeight:on?800:600,color:on?"var(--accent, #2563EB)":"var(--text-3)",
+                borderBottom:on?"3px solid var(--accent, #2563EB)":"3px solid transparent",marginBottom:-2}}>
+              {l} <span style={{fontSize:12,opacity:.7}}>({count})</span>
+            </button>
+          );
+        })}
       </div>
       <div className="ad-toolbar" style={{marginBottom:14}}>
         {[["active","Active"],["archived","Archived"],["all","All"]].map(([v,l])=>(
           <button key={v} className={`ad-btn ad-btn--sm ${driveFilter===v?"ad-btn--primary":"ad-btn--outline"}`} onClick={()=>setDriveFilter(v)}>{l}</button>
         ))}
       </div>
-      {(()=>{ const filtered=drives.filter(d=>driveFilter==="all"?true:driveFilter==="archived"?d.status==="ARCHIVED":d.status!=="ARCHIVED");
-        return filtered.length===0 ? <div className="ad-empty">No {driveFilter==="all"?"":driveFilter} drives.</div> :
+      {(()=>{ const filtered=drives.filter(d=>{
+          const inRound=(Number(d.round)||1)===Number(roundFilter);
+          const inStatus=driveFilter==="all"?true:driveFilter==="archived"?d.status==="ARCHIVED":d.status!=="ARCHIVED";
+          return inRound && inStatus;
+        });
+        return filtered.length===0 ? <div className="ad-empty">No {roundFilter==="2"?"Second":"First"} Round {driveFilter==="all"?"":driveFilter} drives yet.</div> :
         <div className="ad-drive-grid">
           {filtered.map(d=>{
             const isWk=d.driveType==="WALK_IN";
@@ -1310,6 +1342,7 @@ function DrivesTab() {
               <div className="ad-drive-head">
                 <span className="ad-badge" style={{background:typeC+"22",color:typeC}}>{isWk?"WALK-IN":"PRE-REG"}</span>
                 <span className="ad-badge" style={{background:stC+"22",color:stC}}>{d.status||"ACTIVE"}</span>
+                {Number(d.round)===2 && <span className="ad-badge" style={{background:"#7C3AED22",color:"#7C3AED"}}>ROUND 2</span>}
               </div>
               <div className="ad-drive-name">{d.name}</div>
               {d.college && <div className="ad-drive-college">🏫 {d.college}</div>}
@@ -1828,8 +1861,6 @@ const TABS = [
   { id:"dashboard", icon:"📊", label:"Dashboard"  },
   { id:"drives",    icon:"🎓", label:"Campus Drives" },
   { id:"allcand",   icon:"🌐", label:"All Candidates" },
-  { id:"students",  icon:"👥", label:"Students"   },
-  { id:"attempts",  icon:"📋", label:"Attempts"   },
   { id:"questions", icon:"❓", label:"Questions"  },
   { id:"cutoff",    icon:"🎯", label:"Cutoff"     },
   { id:"settings",  icon:"⚙️",  label:"Settings"   },
