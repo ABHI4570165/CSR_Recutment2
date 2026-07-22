@@ -12,6 +12,9 @@ const questionSchema = new mongoose.Schema({
                   required: function () { return this.type === "mcq"; } },
   // Text-answer field — the expected exact typed answer (used when type === "text").
   answerText:   { type: String, default: null },
+  // Optional HTML shown ABOVE the question (e.g. SQL reference tables that every
+  // question in a section shares). Rendered as-is in the exam UI.
+  reference:    { type: String, default: null },
   marks:        { type: Number, default: 1, min: 1 },
   section:      { type: String, required: true, trim: true, index: true }, // no enum — supports custom sections
   order:        { type: Number, default: 0 },

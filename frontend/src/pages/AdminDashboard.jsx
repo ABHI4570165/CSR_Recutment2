@@ -55,10 +55,17 @@ const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
 // Round-2 technical section options (for the section dropdown when editing/creating).
 const TECH_SECTION_OPTS = [
-  { name:"t_sec_a", displayName:"[R2] Section A — Tricky Concept MCQs" },
-  { name:"t_sec_b", displayName:"[R2] Section B — Predict the Output" },
-  { name:"t_sec_c", displayName:"[R2] Section C — Predict the Output: Advanced" },
+  { name:"t_sec_a", displayName:"[R2] Section A — MCQs" },
+  { name:"t_sec_b", displayName:"[R2] Section B — Python / Output" },
+  { name:"t_sec_c", displayName:"[R2] Section C — Advanced / SQL" },
+  { name:"t_sec_d", displayName:"[R2] Section D — DSA" },
 ];
+// Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced).
+const ROUND2_VERSIONS = {
+  A: { label:"Version A — Aptitude (Set A & Set B · 30 Q)",              sets:["A","B"] },
+  B: { label:"Version B — Advanced Python/SQL/DSA (Set C & Set D · 40 Q)", sets:["C","D"] },
+};
+const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B" };
 
 // ── Question Form (MCQ or typed-answer) ───────────────────────────────────────
 function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
@@ -80,7 +87,7 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
   const save = () => {
     if(!text.trim())          { setErr("Question text is required."); return; }
     if(!section)              { setErr("Please select a section."); return; }
-    if(Number(round)===2 && !set){ setErr("Round 2 questions must belong to Set A or Set B."); return; }
+    if(Number(round)===2 && !set){ setErr("Round 2 questions must belong to a Set (A/B in Version A, C/D in Version B)."); return; }
     const base={ text:text.trim(), type, marks:Number(marks)||1, section,
       round:Number(round)||1, set: Number(round)===2 ? set : null };
     if(type==="text"){
@@ -119,11 +126,17 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
             <option value={2}>Round 2 (Technical)</option>
           </select>
           {Number(round)===2 && (<>
-            <label className="ad-label" style={{marginTop:6}}>Set</label>
+            <label className="ad-label" style={{marginTop:6}}>Version · Set</label>
             <select className="ad-input ad-select" value={set} onChange={e=>setSet(e.target.value)}>
               <option value="">Select set…</option>
-              <option value="A">Set A</option>
-              <option value="B">Set B</option>
+              <optgroup label="Version A (Aptitude)">
+                <option value="A">Set A</option>
+                <option value="B">Set B</option>
+              </optgroup>
+              <optgroup label="Version B (Advanced)">
+                <option value="C">Set C</option>
+                <option value="D">Set D</option>
+              </optgroup>
             </select>
           </>)}
         </div>
@@ -750,11 +763,26 @@ const ROUND2_SECTIONS = [
   { name:"t_sec_b", displayName:"Section B — Predict the Output",           questionCount:10, color:"#7C3AED" },
   { name:"t_sec_c", displayName:"Section C — Predict the Output: Advanced", questionCount:10, color:"#0891B2" },
 ];
+// Sets C/D — advanced 4-section paper (MCQ, Python, SQL with reference tables, DSA).
+const ROUND2_SECTIONS_CD = [
+  { name:"t_sec_a", displayName:"Section A — Logic & Technical MCQs",     questionCount:10, color:"#4F46E5" },
+  { name:"t_sec_b", displayName:"Section B — Python Output Prediction",   questionCount:10, color:"#7C3AED" },
+  { name:"t_sec_c", displayName:"Section C — SQL Output Prediction",      questionCount:10, color:"#0891B2" },
+  { name:"t_sec_d", displayName:"Section D — Data Structures & Algorithms", questionCount:10, color:"#059669" },
+];
+// Round-2 versions the admin picks from when creating a Round 2 drive.
+// Version A = Sets A & B (aptitude); Version B = Sets C & D (advanced). The two
+// sets in a version alternate between candidates.
+const ROUND2_PAPERS = {
+  A: { label:ROUND2_VERSIONS.A.label, sets:["A","B"], sections:ROUND2_SECTIONS },
+  B: { label:ROUND2_VERSIONS.B.label, sets:["C","D"], sections:ROUND2_SECTIONS_CD },
+};
 
 function CreateDriveModal({ sections, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
   const [round,setRound]=useState(1);
+  const [round2Paper,setRound2Paper]=useState("A");   // which round-2 version (A=Sets A&B, B=Sets C&D)
   const [maxCandidates,setMaxCandidates]=useState("");
   const [duration,setDuration]=useState(40);
   const [passing,setPassing]=useState(30);
@@ -773,9 +801,10 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     if(!name.trim()){ setErr("Drive name is required."); return; }
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
     if(driveType==="WALK_IN" && round!==2 && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
-    // Round 2 uses the fixed Technical sections; Round 1 uses the chosen pool sections.
+    // Round 2 uses the sections of the chosen set-paper; Round 1 uses the chosen pool sections.
+    const paper = ROUND2_PAPERS[round2Paper] || ROUND2_PAPERS.CD;
     const chosen = round===2
-      ? ROUND2_SECTIONS
+      ? paper.sections
       : secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
     if(round!==2 && !chosen.length){ setErr("Select at least one section."); return; }
     if(!date){ setErr("Assessment date is required."); return; }
@@ -788,6 +817,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     try{
       await createAssessment({
         name:name.trim(), driveType, round, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
+        ...(round===2 ? { round2Sets: paper.sets } : {}),
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
@@ -876,13 +906,19 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
 
           <section className="ad-card-section">
             <div className="ad-card-section-title">❓ Question Configuration</div>
-            {round===2 ? (
-              <div className="ad-note ad-note--info">
-                <strong>Round 2 — Technical Sets A &amp; B.</strong> Each candidate is automatically given <strong>ONE</strong> set
-                (A or B), alternating between students. Both sets have 30 questions (Section A MCQs + Sections B/C typed-output),
-                50 marks, jumbled within each section. Edit these questions in the <strong>Questions</strong> tab (filter Round 2).
+            {round===2 ? (<>
+              <div className="ad-field">
+                <label className="ad-label">Question Version for this drive</label>
+                <select className="ad-input ad-select" value={round2Paper} onChange={e=>setRound2Paper(e.target.value)}>
+                  {Object.entries(ROUND2_PAPERS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D. Each candidate gets ONE set, alternating between students.</span>
               </div>
-            ) : (<>
+              <div className="ad-note ad-note--info" style={{marginTop:10}}>
+                <strong>Selected: {ROUND2_PAPERS[round2Paper]?.label}.</strong> Questions are jumbled within each section; MCQ options shuffled.
+                SQL questions show their reference tables. Edit these in the <strong>Questions</strong> tab (Round 2 · Version {round2Paper} → Set {ROUND2_PAPERS[round2Paper]?.sets.join(" / ")}).
+              </div>
+            </>) : (<>
               <span className="ad-hint" style={{display:"block",marginBottom:6}}>Sections are drawn from the shared question pool. Tick the sections to include and set the question count.</span>
               <div className="ad-sec-pick-list">
                 {secs.map((s,i)=>(
@@ -2266,13 +2302,19 @@ function Dashboard({ onLogout }) {
               <select className="ad-select" value={qRound} onChange={e=>{setQRound(e.target.value);setQSection("");if(e.target.value!=="2")setQSet("");}}>
                 <option value="">All Rounds</option>
                 <option value="1">Round 1 (Aptitude pool)</option>
-                <option value="2">Round 2 (Technical Sets A/B)</option>
+                <option value="2">Round 2 (Technical)</option>
               </select>
               {qRound==="2" && (
                 <select className="ad-select" value={qSet} onChange={e=>setQSet(e.target.value)}>
-                  <option value="">All Sets (A + B)</option>
-                  <option value="A">Set A</option>
-                  <option value="B">Set B</option>
+                  <option value="">All Versions / Sets</option>
+                  <optgroup label="Version A (Aptitude)">
+                    <option value="A">Set A</option>
+                    <option value="B">Set B</option>
+                  </optgroup>
+                  <optgroup label="Version B (Advanced)">
+                    <option value="C">Set C</option>
+                    <option value="D">Set D</option>
+                  </optgroup>
                 </select>
               )}
               <select className="ad-select" value={qSection} onChange={e=>setQSection(e.target.value)}>

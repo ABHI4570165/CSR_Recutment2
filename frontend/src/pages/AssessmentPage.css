@@ -274,3 +274,15 @@
   line-height: 1.55;
   tab-size: 4;
 }
+
+/* Shared reference tables (SQL) shown with each question. */
+.qp-ref { margin: 12px 0 4px; display: flex; flex-wrap: wrap; gap: 16px; overflow-x: auto; }
+.qp-ref .qp-ref-table { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.qp-ref .qp-ref-name {
+  font-weight: 800; font-size: 12.5px; color: #334155; letter-spacing: .02em;
+  background: #f1f5f9; padding: 6px 10px; border-bottom: 1px solid #e2e8f0;
+}
+.qp-ref table { border-collapse: collapse; font-size: 13px; font-family: ui-monospace, Consolas, monospace; }
+.qp-ref th, .qp-ref td { border: 1px solid #e5e7eb; padding: 5px 12px; text-align: left; white-space: nowrap; }
+.qp-ref th { background: #eef2ff; color: #3730a3; font-weight: 700; }
+.qp-ref tbody tr:nth-child(even) td { background: #f8fafc; }

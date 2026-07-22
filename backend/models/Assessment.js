@@ -34,6 +34,9 @@ const assessmentSchema = new mongoose.Schema({
   // Round 1 = existing question pool (by section). Round 2 = fed technical sets A/B,
   // one set assigned per candidate (alternating). Additive: old drives stay round 1.
   round:              { type: Number, enum: [1, 2], default: 1 },
+  // Round-2 question sets this drive draws from, assigned to candidates in
+  // round-robin order (e.g. ["C","D"]). Defaults to ["A","B"] for older drives.
+  round2Sets:         { type: [String], default: undefined },
   deadline:           { type: Date },                  // legacy link expiry (kept for back-compat)
   isActive:           { type: Boolean, default: true },
 

@@ -32,6 +32,7 @@ function buildQuestionDoc(b) {
   if (!b.answerText || !String(b.answerText).trim()) return { error: "Text questions need an expected answer." };
   return { doc: { text: String(b.text).trim(), type, options: undefined, correctIndex: null,
     answerText: String(b.answerText).trim(), marks: b.marks || 1, section: b.section,
+    ...(b.reference !== undefined ? { reference: b.reference || null } : {}),
     ...(b.round != null ? { round: parseInt(b.round) || 1 } : {}), ...(b.set != null ? { set: b.set || null } : {}) } };
 }
 

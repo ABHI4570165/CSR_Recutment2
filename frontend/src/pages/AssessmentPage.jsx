@@ -1245,12 +1245,14 @@ export default function AssessmentPage() {
             {(() => {
               const text = q?.text || "";
               // Multi-line questions are code/SQL — render the code part in a monospace
-              // block so indentation lines up. A leading "prompt:" line stays as normal text.
+              // block so indentation lines up. A leading prompt sentence stays as normal text.
               if (!text.includes("\n")) return <div className="qp-q-text" style={{ whiteSpace: "pre-wrap" }}>{text}</div>;
               const nl = text.indexOf("\n");
               const first = text.slice(0, nl);
               const rest = text.slice(nl + 1);
-              const promptIsHeading = /[:：]\s*$/.test(first);
+              // First line is a prompt heading if it's short prose ending in : . or ?
+              // and has no code characters (so real code lines stay in the block).
+              const promptIsHeading = /[:：.?]\s*$/.test(first) && first.length < 90 && !/[=(){};]/.test(first);
               return (
                 <div className="qp-q-text">
                   {promptIsHeading && <div style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{first}</div>}
@@ -1258,6 +1260,10 @@ export default function AssessmentPage() {
                 </div>
               );
             })()}
+            {q?.reference && (
+              // Shared reference tables (e.g. SQL Emp/Dept/Sales) shown with every question.
+              <div className="qp-ref" dangerouslySetInnerHTML={{ __html: q.reference }} />
+            )}
             {q?.type === "text" ? (
               // Round-2 typed-answer question — no options; candidate types the exact output.
               <div className="qp-text-answer">

@@ -61,7 +61,9 @@ exports.createAssessment = async (req, res) => {
       ...(Array.isArray(sections) && sections.length ? { sections } : {}),
       randomizeQuestions: randomizeQuestions !== false,
       randomizeOptions:   randomizeOptions   !== false,
-      ...(Number(b.round) === 2 ? { round: 2 } : {}),   // Round 2 = fed technical sets A/B
+      ...(Number(b.round) === 2 ? { round: 2 } : {}),   // Round 2 = fed technical sets
+      ...(Number(b.round) === 2 && Array.isArray(b.round2Sets) && b.round2Sets.length
+        ? { round2Sets: b.round2Sets.map(s => String(s).trim().toUpperCase()).filter(Boolean) } : {}),
 
       ...(deadline ? { deadline: new Date(deadline) } : {}),
       // Scheduling window
@@ -127,7 +129,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round"];
+      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round", "round2Sets"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
@@ -671,8 +673,9 @@ async function buildPaper(assessment, set = null) {
       const qid = String(q._id);
       questionOrder.push(qid);
       if (q.type === "text") {
-        // Typed-answer: no options, no answer leaked to the client.
-        clientQuestions.push({ id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text, type: "text", marks: q.marks || 1 });
+        // Typed-answer: no options, no answer leaked to the client. `reference`
+        // carries shared HTML (e.g. SQL tables) shown with the question.
+        clientQuestions.push({ id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text, type: "text", marks: q.marks || 1, ...(q.reference ? { reference: q.reference } : {}) });
       } else {
         const idxs = (q.options || []).map((_, i) => i);
         const dispIdxs = assessment.randomizeOptions ? shuffle(idxs) : idxs;
@@ -704,7 +707,7 @@ async function rehydratePaper(progress, assessment) {
     const q = map[qid];
     if (!q) return;
     if (q.type === "text") {
-      clientQuestions.push({ id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section, text: q.text, type: "text", marks: q.marks || 1 });
+      clientQuestions.push({ id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section, text: q.text, type: "text", marks: q.marks || 1, ...(q.reference ? { reference: q.reference } : {}) });
     } else {
       const dispIdxs = optionOrder[qid] || (q.options || []).map((_, i) => i);
       clientQuestions.push({
@@ -832,8 +835,10 @@ exports.startCandidate = async (req, res) => {
     // Fixed once and stored so a resume shows the same paper.
     let assignedSet = c.assignedSet || null;
     if (assessment.round === 2 && !assignedSet) {
+      const sets = (Array.isArray(assessment.round2Sets) && assessment.round2Sets.length)
+        ? assessment.round2Sets : ["A", "B"];   // default for older drives
       const already = await Candidate.countDocuments({ assessmentId: assessment._id, assignedSet: { $ne: null } });
-      assignedSet = (already % 2 === 0) ? "A" : "B";
+      assignedSet = sets[already % sets.length];   // round-robin across the drive's sets
       c.assignedSet = assignedSet;
     }
 
