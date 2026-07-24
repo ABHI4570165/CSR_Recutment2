@@ -6,7 +6,7 @@ import {
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers,
   getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
@@ -1669,10 +1669,22 @@ function Field({ label, value }) {
 function CandidateProfile({ candidate: c, onClose }) {
   const [tab, setTab] = useState("personal");
   const [resumeOpen, setResumeOpen] = useState(false);
+  const [ansData, setAnsData] = useState(null);       // { candidate, answers, note? }
+  const [ansLoading, setAnsLoading] = useState(false);
+  const [ansErr, setAnsErr] = useState("");
+  useEffect(() => {
+    if (tab !== "answers" || ansData || ansLoading) return;
+    (async () => {
+      setAnsLoading(true); setAnsErr("");
+      try { const r = await fetchCandidateAnswers(c._id); setAnsData(r.data.data); }
+      catch (e) { setAnsErr(e.message || "Failed to load answers."); }
+      finally { setAnsLoading(false); }
+    })();
+  }, [tab]);
   const sm = STATUS_META.find(s => s.key === c.status) || { label: c.status, color: "#64748B" };
   const pct = (c.score != null && c.totalMarks) ? Math.round(c.score / c.totalMarks * 100) + "%" : "—";
   const v = c.violations || {};
-  const TABS = [["personal","Personal"],["assessment","Assessment"],["security","Security"],["resume","Resume"]];
+  const TABS = [["personal","Personal"],["assessment","Assessment"],["answers","Answers"],["security","Security"],["resume","Resume"]];
   return (
     <div className="ad-overlay" onClick={onClose}>
       <div className="ad-modal ad-modal--wide" onClick={e => e.stopPropagation()}>
@@ -1726,6 +1738,39 @@ function CandidateProfile({ candidate: c, onClose }) {
                 <Field label="Completed" value={fmtDateTime(c.completedAt)} />
                 <Field label="Submission" value={c.submissionReason || "—"} />
               </div>
+            </section>
+          )}
+          {tab === "answers" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">📝 Answer Sheet {ansData?.candidate?.assignedSet ? `· Set ${ansData.candidate.assignedSet}` : ""}</div>
+              {ansLoading ? <div className="ad-loading"><Spinner dark/>Loading answers…</div>
+              : ansErr ? <p className="ad-form-err">{ansErr}</p>
+              : !ansData || !ansData.answers?.length ? (
+                <div className="ad-empty">{ansData?.note || "No answers recorded for this candidate yet."}</div>
+              ) : (
+                <>
+                  <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:12,fontSize:13}}>
+                    <span>✅ Correct: <strong style={{color:"#059669"}}>{ansData.answers.filter(a=>a.isCorrect).length}</strong></span>
+                    <span>❌ Wrong: <strong style={{color:"#DC2626"}}>{ansData.answers.filter(a=>!a.isCorrect && a.given!=null).length}</strong></span>
+                    <span>⭕ Unanswered: <strong style={{color:"#64748B"}}>{ansData.answers.filter(a=>a.given==null).length}</strong></span>
+                    {c.score!=null && <span>🎯 Score: <strong>{c.score}/{c.totalMarks}</strong></span>}
+                  </div>
+                  <div className="ad-table-wrap" style={{maxHeight:420,overflowY:"auto"}}>
+                    <table className="ad-table">
+                      <thead><tr><th>#</th><th style={{minWidth:260}}>Question</th><th>Student's Answer</th><th>Correct Answer</th><th></th></tr></thead>
+                      <tbody>{ansData.answers.map(a=>(
+                        <tr key={a.n} style={{background:a.given==null?"transparent":a.isCorrect?"#ECFDF522":"#FEF2F222"}}>
+                          <td className="ad-td-num">{a.n}</td>
+                          <td style={{fontSize:12.5,whiteSpace:"pre-wrap",fontFamily:a.text?.includes("\n")?"ui-monospace,Consolas,monospace":"inherit",maxWidth:420}}>{a.text}</td>
+                          <td style={{fontSize:12.5,fontFamily:"ui-monospace,Consolas,monospace"}}>{a.given==null?<span style={{color:"#94A3B8"}}>— not answered —</span>:a.given}</td>
+                          <td style={{fontSize:12.5,fontFamily:"ui-monospace,Consolas,monospace",color:"#059669"}}>{a.correct??"—"}</td>
+                          <td>{a.given==null?"⭕":a.isCorrect?"✅":"❌"}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </section>
           )}
           {tab === "security" && (

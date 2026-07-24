@@ -3,6 +3,7 @@ const {
   createAssessment, listAssessments, getAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleEmails,
   listCandidates, candidateStats, overviewStats, listColleges, updateCandidateStatus, deleteCandidate, getCandidateResume,
+  getCandidateAnswers,
 } = require("../controllers/assessmentController");
 const { authAdmin, requireFullAdmin } = require("../middleware/auth");
 
@@ -17,6 +18,7 @@ router.post  ("/candidates",  authAdmin, requireFullAdmin, uploadCandidates);
 router.post  ("/schedule",    authAdmin, requireFullAdmin, scheduleEmails);
 router.patch ("/candidates/status", authAdmin, requireFullAdmin, updateCandidateStatus);
 router.get   ("/candidates/:id/resume", authAdmin, getCandidateResume);
+router.get   ("/candidates/:id/answers", authAdmin, getCandidateAnswers);
 router.delete("/candidates/:id",    authAdmin, requireFullAdmin, deleteCandidate);
 router.get   ("/:id",         authAdmin, getAssessment);
 router.put   ("/:id",         authAdmin, requireFullAdmin, updateAssessment);

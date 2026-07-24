@@ -550,6 +550,64 @@ exports.getCandidateResume = async (req, res) => {
   }
 };
 
+// GET /api/assessments/candidates/:id/answers — per-question answer review (admin).
+// Completed candidates use the answerSheet stored at submission; in-progress
+// candidates get a live sheet built from their saved progress.
+exports.getCandidateAnswers = async (req, res) => {
+  try {
+    const c = await Candidate.findById(req.params.id)
+      .select("name email college status score totalMarks assignedSet answerSheet progress").lean();
+    if (!c) return res.status(404).json({ success: false, message: "Candidate not found." });
+
+    let sheet = c.answerSheet;
+    if (!sheet && c.progress?.questionOrder?.length) {
+      // Live view for an in-progress attempt (no correctness leak concern — admin only).
+      const qids = c.progress.questionOrder;
+      const optionOrder = c.progress.optionOrder instanceof Map
+        ? Object.fromEntries(c.progress.optionOrder) : (c.progress.optionOrder || {});
+      const rawAns = c.progress.answers instanceof Map
+        ? Object.fromEntries(c.progress.answers) : (c.progress.answers || {});
+      const docs = await Question.find({ _id: { $in: qids } }).lean();
+      const qmap = {}; docs.forEach(q => { qmap[String(q._id)] = q; });
+      const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+      sheet = qids.map(qid => {
+        const q = qmap[qid]; if (!q) return null;
+        const ans = rawAns[qid];
+        const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
+        let given = null, correct = false;
+        if (ans != null && ans !== "") {
+          if (q.type === "text") { given = String(ans); correct = q.answerText != null && norm(ans) === norm(q.answerText); }
+          else { const oi = (optionOrder[qid] || [])[ans]; given = oi != null && q.options ? (q.options[oi] ?? null) : null; correct = oi === q.correctIndex; }
+        }
+        return { qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 };
+      }).filter(Boolean);
+    }
+
+    if (!sheet || !sheet.length) {
+      return res.json({ success: true, data: { candidate: pickCand(c), answers: [],
+        note: "No answer data for this candidate (submitted before answer recording was enabled)." } });
+    }
+
+    // Join current question text (kept out of the sheet to keep candidate docs light).
+    const docs = await Question.find({ _id: { $in: sheet.map(s => s.qid) } }).select("text type").lean();
+    const qmap = {}; docs.forEach(q => { qmap[String(q._id)] = q; });
+    const answers = sheet.map((s, i) => ({
+      n: i + 1, section: s.section,
+      text: qmap[s.qid]?.text || "(question was edited or removed)",
+      type: qmap[s.qid]?.type || (s.correct && s.correct.length > 30 ? "text" : undefined),
+      given: s.given, correct: s.correct, isCorrect: !!s.isCorrect, marks: s.marks || 0,
+    }));
+    res.json({ success: true, data: { candidate: pickCand(c), answers } });
+  } catch (err) {
+    console.error("getCandidateAnswers:", err);
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+function pickCand(c) {
+  return { name: c.name, email: c.email, college: c.college, status: c.status,
+    score: c.score ?? null, totalMarks: c.totalMarks ?? null, assignedSet: c.assignedSet || null };
+}
+
 exports.deleteCandidate = async (req, res) => {
   try {
     const c = await Candidate.findByIdAndDelete(req.params.id);
@@ -926,23 +984,29 @@ exports.submitCandidate = async (req, res) => {
     (assessment.sections || []).forEach(s => { sectionScores[s.name] = 0; });
 
     const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    const answerSheet = [];   // per-question record kept so admins can review answers
     qids.forEach(qid => {
       const q = qmap[qid];
       if (!q) return;
       totalMarks += q.marks || 1;
       const ans = answers[qid];
-      if (ans == null || ans === "") return;
-      let correct;
-      if (q.type === "text") {
-        correct = q.answerText != null && norm(ans) === norm(q.answerText); // typed exact-output answer
-      } else {
-        const origIdx = (optionOrder[qid] || [])[ans];                      // mcq: map display→original
-        correct = origIdx === q.correctIndex;
+      const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
+      let correct = false, given = null;
+      if (ans != null && ans !== "") {
+        if (q.type === "text") {
+          given = String(ans);
+          correct = q.answerText != null && norm(ans) === norm(q.answerText); // typed exact-output answer
+        } else {
+          const origIdx = (optionOrder[qid] || [])[ans];                      // mcq: map display→original
+          given = origIdx != null && q.options ? (q.options[origIdx] ?? null) : null;
+          correct = origIdx === q.correctIndex;
+        }
+        if (correct) {
+          score += q.marks || 1;
+          sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
+        }
       }
-      if (correct) {
-        score += q.marks || 1;
-        sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
-      }
+      answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
     });
 
     const passed = score >= (assessment.passingScore || 0);
@@ -964,6 +1028,7 @@ exports.submitCandidate = async (req, res) => {
     c.passed = disqualified ? false : passed;
     c.sectionScores = sectionScores;
     c.timeTakenSeconds = elapsed;
+    c.answerSheet = answerSheet;   // kept for the admin per-question answer view
     c.progress = undefined; // free the in-flight snapshot
     // Queue the completion email (thank-you if completed, termination if disqualified).
     // Queued + retried by the scheduler so a transient failure never loses it.

@@ -130,6 +130,20 @@ const candidateSchema = new mongoose.Schema({
   // In-flight progress (for accidental-exit recovery / resume)
   progress: { type: progressSchema, default: undefined },
 
+  // Per-question record saved at submission so admins can review every answer.
+  // Light on purpose: question text is joined from Question at read time.
+  answerSheet: {
+    type: [new mongoose.Schema({
+      qid:       { type: String },
+      section:   { type: String },
+      given:     { type: String, default: null },  // student's answer (option text / typed output)
+      correct:   { type: String, default: null },  // correct answer at submission time
+      isCorrect: { type: Boolean, default: false },
+      marks:     { type: Number, default: 0 },     // marks earned on this question
+    }, { _id: false })],
+    default: undefined,
+  },
+
   startedAt:   { type: Date },
   completedAt: { type: Date },
 

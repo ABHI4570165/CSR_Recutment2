@@ -189,6 +189,7 @@ export const fetchDriveColleges   = (p)     => adminApi.get("/assessments/colleg
 export const setCandidateStatus   = (d)     => adminApi.patch("/assessments/candidates/status", d);
 export const deleteCandidate      = (id)    => adminApi.delete(`/assessments/candidates/${id}`);
 export const downloadResume       = (id)    => adminApi.get(`/assessments/candidates/${id}/resume`, { responseType: "blob" });
+export const fetchCandidateAnswers = (id)   => adminApi.get(`/assessments/candidates/${id}/answers`);
 export const downloadResumeFile   = (id)    => adminApi.get(`/assessments/candidates/${id}/resume?download=1`, { responseType: "blob" });
 
 // ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────
