@@ -64,7 +64,7 @@ function parseSet(paras, set) {
       cur = {
         set, round: 2, section: sectionKey, sectionDisplay, qno: parseInt(qM[1]),
         text, type: "mcq", options: [], correctIndex: -1, answerText: null,
-        marks: markM ? parseInt(markM[1]) : (secLetter === "A" ? 1 : 2),
+        marks: 1,   // Round 2 is scored 1 mark per question across all sets/sections
       };
       continue;
     }

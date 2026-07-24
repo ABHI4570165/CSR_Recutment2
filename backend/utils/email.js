@@ -233,7 +233,7 @@ function shortlistHtml({ name, dateStr, timeStr }) {
       </p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;font-size:14px;margin-bottom:18px;">
         <tr><td style="padding:12px 16px;color:#6b7280;width:45%;">Assessment Date</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(dateStr)}</td></tr>
-        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Assessment Time</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
+        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Start Time</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
       </table>
       <p style="color:#374151;font-size:13.5px;margin:0 0 8px;font-weight:700;">Please ensure you have:</p>
       <ul style="color:#4b5563;font-size:13px;line-height:1.8;margin:0 0 18px;padding-left:18px;">
@@ -257,10 +257,13 @@ function linkReadyHtml({ name, dateStr, timeStr, link }) {
     <div style="padding:32px 28px;">
       <h2 style="color:#111827;font-size:19px;margin:0 0 10px;">Dear ${esc(name)},</h2>
       <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 18px;">Your assessment is scheduled as follows:</p>
-      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;font-size:14px;margin-bottom:20px;">
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;font-size:14px;margin-bottom:16px;">
         <tr><td style="padding:12px 16px;color:#6b7280;width:30%;">Date</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(dateStr)}</td></tr>
-        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Time</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
+        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Start Time</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
       </table>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:18px;">
+        <p style="color:#1e40af;font-size:13.5px;margin:0;line-height:1.6;">⏰ The assessment <strong>starts at ${esc(timeStr)}</strong>. Please log in a few minutes early and be ready by then.</p>
+      </div>
       <p style="color:#4b5563;font-size:14px;margin:0 0 14px;">You may now access your assessment using the link below:</p>
       <div style="text-align:center;margin:18px 0;">
         <a href="${safeLink}" style="background:${PRIMARY};color:#fff;padding:15px 44px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;">
@@ -353,7 +356,7 @@ async function sendLinkEmail(candidate, assessment, link) {
     to: candidate.email,
     subject: `Your Assessment Link Is Ready | ${BRAND}`,
     html: linkReadyHtml({ name: candidate.name, dateStr, timeStr, link }),
-    text: `Dear ${candidate.name},\n\nYour assessment is scheduled on ${dateStr} at ${timeStr}.\n\nOpen your assessment: ${link}\n\nEnsure fullscreen, webcam, and a stable connection. Attempt only within the scheduled window.\n\n${BRAND} · ${HIRING_PARTNER}`,
+    text: `Dear ${candidate.name},\n\nYour assessment is scheduled on ${dateStr}. Start Time: ${timeStr}. The assessment starts at ${timeStr} — please log in a few minutes early.\n\nOpen your assessment: ${link}\n\nEnsure fullscreen, webcam, and a stable connection. Attempt only within the scheduled window.\n\n${BRAND} · ${HIRING_PARTNER}`,
   });
 }
 // Back-compat alias — older code/imports call sendInvitationEmail.
@@ -366,7 +369,7 @@ async function sendShortlistEmail(candidate, assessment) {
     to: candidate.email,
     subject: `Congratulations! You Have Been Shortlisted | ${BRAND}`,
     html: shortlistHtml({ name: candidate.name, dateStr, timeStr }),
-    text: `Dear ${candidate.name},\n\nCongratulations! You have been shortlisted for the recruitment assessment by ${BRAND} in association with ${HIRING_PARTNER}.\n\nAssessment Date: ${dateStr}\nAssessment Time: ${timeStr}\n\nEnsure you have a laptop/desktop, webcam, stable internet, a quiet room, and updated Chrome/Edge.\n\nYour assessment link will be shared separately before the assessment.\n\n${BRAND} · ${HIRING_PARTNER}`,
+    text: `Dear ${candidate.name},\n\nCongratulations! You have been shortlisted for the recruitment assessment by ${BRAND} in association with ${HIRING_PARTNER}.\n\nAssessment Date: ${dateStr}\nStart Time: ${timeStr}\n\nEnsure you have a laptop/desktop, webcam, stable internet, a quiet room, and updated Chrome/Edge.\n\nYour assessment link will be shared separately before the assessment.\n\n${BRAND} · ${HIRING_PARTNER}`,
   });
 }
 
@@ -436,7 +439,7 @@ module.exports = {
   logMailError,
   sendInvitationEmail,
   sendLinkEmail,
-  sendShortlistEmail,
+  sendShortlistEmail, 
   sendDisqualificationEmail,
   sendThankYouEmail,
   sendQuizLink,

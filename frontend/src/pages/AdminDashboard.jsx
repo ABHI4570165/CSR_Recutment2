@@ -62,8 +62,8 @@ const TECH_SECTION_OPTS = [
 ];
 // Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced).
 const ROUND2_VERSIONS = {
-  A: { label:"Version A — Aptitude (Set A & Set B · 30 Q)",              sets:["A","B"] },
-  B: { label:"Version B — Advanced Python/SQL/DSA (Set C & Set D · 40 Q)", sets:["C","D"] },
+  A: { label:"Version A — Aptitude · Set A & B · 30 Q · 30 marks (1 each)",              sets:["A","B"] },
+  B: { label:"Version B — Advanced Python/SQL/DSA · Set C & D · 40 Q · 40 marks (1 each)", sets:["C","D"] },
 };
 const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B" };
 
@@ -782,7 +782,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
   const [round,setRound]=useState(1);
-  const [round2Paper,setRound2Paper]=useState("A");   // which round-2 version (A=Sets A&B, B=Sets C&D)
+  const [round2Paper,setRound2Paper]=useState("B");   // default to Version B (Sets C&D · 40 Q); A = Sets A&B · 30 Q
   const [maxCandidates,setMaxCandidates]=useState("");
   const [duration,setDuration]=useState(40);
   const [passing,setPassing]=useState(30);
