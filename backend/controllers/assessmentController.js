@@ -608,6 +608,54 @@ function pickCand(c) {
     score: c.score ?? null, totalMarks: c.totalMarks ?? null, assignedSet: c.assignedSet || null };
 }
 
+// POST /api/assessments/candidates/:id/terminate — admin ends a live attempt now.
+// Scores whatever was answered so far, marks the candidate disqualified, and the
+// student's exam page ends within one auto-save cycle (or on refresh).
+exports.terminateCandidate = async (req, res) => {
+  try {
+    const c = await Candidate.findById(req.params.id);
+    if (!c) return res.status(404).json({ success: false, message: "Candidate not found." });
+    if (!["started", "in-progress"].includes(c.status)) {
+      return res.status(400).json({ success: false, message: `Cannot terminate — candidate is already '${c.status}'.` });
+    }
+    const prog = c.progress || {};
+    const qids = prog.questionOrder || [];
+    const optionOrder = prog.optionOrder instanceof Map ? Object.fromEntries(prog.optionOrder) : (prog.optionOrder || {});
+    const rawAns = prog.answers instanceof Map ? Object.fromEntries(prog.answers) : (prog.answers || {});
+    const docs = await Question.find({ _id: { $in: qids } }).lean();
+    const qmap = {}; docs.forEach(q => { qmap[String(q._id)] = q; });
+    const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+    let score = 0, totalMarks = 0; const sectionScores = {}; const answerSheet = [];
+    qids.forEach(qid => {
+      const q = qmap[qid]; if (!q) return;
+      totalMarks += q.marks || 1;
+      const ans = rawAns[qid];
+      const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
+      let correct = false, given = null;
+      if (ans != null && ans !== "") {
+        if (q.type === "text") { given = String(ans); correct = q.answerText != null && norm(ans) === norm(q.answerText); }
+        else { const oi = (optionOrder[qid] || [])[ans]; given = oi != null && q.options ? (q.options[oi] ?? null) : null; correct = oi === q.correctIndex; }
+        if (correct) { score += q.marks || 1; sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1); }
+      }
+      answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
+    });
+    c.status = "disqualified";
+    c.submissionReason = "disqualified";
+    c.terminationReason = String(req.body?.reason || "Terminated by the administrator").slice(0, 200);
+    c.completedAt = new Date();
+    c.score = score; c.totalMarks = totalMarks; c.sectionScores = sectionScores; c.passed = false;
+    c.answerSheet = answerSheet;
+    if (c.startedAt) c.timeTakenSeconds = Math.floor((now() - new Date(c.startedAt).getTime()) / 1000);
+    c.progress = undefined;
+    c.completionEmail = { status: "pending", scheduledAt: new Date(), attempts: 0 };
+    await c.save();
+    res.json({ success: true, message: `${c.name}'s assessment was terminated.`, data: { name: c.name } });
+  } catch (err) {
+    console.error("terminateCandidate:", err);
+    res.status(500).json({ success: false, message: "Failed to terminate candidate." });
+  }
+};
+
 exports.deleteCandidate = async (req, res) => {
   try {
     const c = await Candidate.findByIdAndDelete(req.params.id);
@@ -933,7 +981,10 @@ exports.startCandidate = async (req, res) => {
 exports.saveProgress = async (req, res) => {
   try {
     const c = req.candidate;
-    if (c.status !== "in-progress") return res.json({ success: true }); // silent no-op
+    if (c.status !== "in-progress") {
+      // Admin may have terminated this attempt — tell the exam page to end immediately.
+      return res.json({ success: true, terminated: c.status === "disqualified", reason: c.terminationReason || null });
+    }
     const { answers, currentQuestion, violations, review, visited, refreshCount } = req.body || {};
 
     const set = { "progress.lastSavedAt": new Date() };

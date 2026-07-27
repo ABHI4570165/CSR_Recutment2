@@ -6,7 +6,7 @@ import {
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers, terminateCandidate,
   getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
@@ -1252,6 +1252,8 @@ function DrivesTab() {
   };
   const removeCand=(id)=>askConfirm("Delete candidate?","This permanently removes the candidate and their attempt. This cannot be undone.",
     async()=>{ await deleteCandidate(id); await loadDriveData(sel._id); showToast({type:"success",title:"Candidate deleted"}); });
+  const terminateCand=(c)=>askConfirm(`Terminate ${c.name}'s test?`,"This ends their live assessment immediately and marks them disqualified. Their answers so far are kept. This cannot be undone.",
+    async()=>{ await terminateCandidate(c._id); await loadDriveData(sel._id); showToast({type:"success",title:`${c.name}'s test terminated`}); });
   const delDrive=(d)=>askConfirm(`Delete drive "${d.name}"?`,"This also deletes ALL its candidates and cannot be undone.",
     async()=>{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); showToast({type:"success",title:"Drive deleted"}); });
   const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>showToast({type:"success",title:"Copied to clipboard"}),()=>{}); };
@@ -1560,6 +1562,8 @@ function DrivesTab() {
                   <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setProfileCand(c)}>View</button>
                   <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>copyLink(c.link)}>Copy</button>
                   {c.resume?.filename && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setResumeView(c)}>📄 CV</button>}
+                  {["started","in-progress"].includes(c.status) && !isViewer() &&
+                    <button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>terminateCand(c)} title="End this student's live test now">⛔ Terminate</button>}
                 </td>
                 <td><button className="ad-btn ad-btn--sm ad-btn--danger" onClick={()=>removeCand(c._id)}>Delete</button></td>
               </tr>

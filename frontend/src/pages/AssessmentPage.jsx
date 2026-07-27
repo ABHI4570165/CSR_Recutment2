@@ -554,13 +554,15 @@ export default function AssessmentPage() {
     if (submitted.current) return;
     setSaveState("saving");
     try {
-      await saveCandidate(token, {
+      const r = await saveCandidate(token, {
         answers: answersRef.current,
         review: [...reviewRef.current],
         visited: [...visitedRef.current],
         currentQuestion: curRef.current,
         violations: violRef.current,
       });
+      // Admin terminated this attempt → end the test immediately.
+      if (r?.data?.terminated) { submitted.current = true; setPhase("terminated"); return; }
       setSaveState("saved");
       setLastSaved(new Date());
     } catch {
