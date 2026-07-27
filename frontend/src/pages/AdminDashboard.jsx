@@ -1549,7 +1549,7 @@ function DrivesTab() {
                 <td className="ad-td-sm">{c.college}</td>
                 <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
                 <td>
-                  <span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span>
+                  <span className="ad-badge" style={{background:(c.submissionReason==="manual-terminate"?"#B45309":sm.color)+"22",color:c.submissionReason==="manual-terminate"?"#B45309":sm.color}}>{c.submissionReason==="manual-terminate"?"Manually Terminated":sm.label}</span>
                   {c.status==="disqualified"&&c.terminationReason&&<div style={{fontSize:11,color:"#DC2626",marginTop:3}}>⛔ {c.terminationReason}</div>}
                   {c.geo&&c.geo.inside!=null&&<div style={{fontSize:11,color:c.geo.inside?"#059669":"#DC2626",marginTop:2}}>📍 {c.geo.inside?"Inside":"Outside"}{c.geo.distance!=null?` · ${c.geo.distance}m`:""}</div>}
                 </td>

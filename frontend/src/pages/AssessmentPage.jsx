@@ -756,15 +756,23 @@ export default function AssessmentPage() {
         else if (idle >= limit * 0.75) setFaceWarn("You appear inactive — interact to avoid termination.");
       }, 3000);
     }
-    // DevTools detection (window/viewport delta heuristic)
+    // DevTools detection — calibrated so normal browser chrome (tabs, toolbar,
+    // bookmarks bar, title bar) does NOT false-trigger. We track the SMALLEST
+    // outer-inner gap seen (that's the chrome with devtools closed); opening a
+    // devtools panel adds a large NEW gap on top of it.
     let devIv = null;
     if (sec.devToolsDetection !== false) {
       let cooldown = 0;
+      let baseW = window.outerWidth - window.innerWidth;
+      let baseH = window.outerHeight - window.innerHeight;
       devIv = setInterval(() => {
         if (submitted.current) return;
-        const wDiff = window.outerWidth - window.innerWidth;
-        const hDiff = window.outerHeight - window.innerHeight;
-        const open = wDiff > 200 || hDiff > 200;
+        const curW = window.outerWidth - window.innerWidth;
+        const curH = window.outerHeight - window.innerHeight;
+        baseW = Math.min(baseW, curW);   // baseline = chrome-only gap (min observed)
+        baseH = Math.min(baseH, curH);
+        // Only a large gap ABOVE the baseline indicates a docked devtools panel.
+        const open = (curW - baseW) > 180 || (curH - baseH) > 180;
         if (open && Date.now() > cooldown) { cooldown = Date.now() + 5000; recordViolation("devtools", "tab", "Developer tools opened"); }
       }, 1500);
     }

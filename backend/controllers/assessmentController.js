@@ -640,8 +640,8 @@ exports.terminateCandidate = async (req, res) => {
       answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
     });
     c.status = "disqualified";
-    c.submissionReason = "disqualified";
-    c.terminationReason = String(req.body?.reason || "Terminated by the administrator").slice(0, 200);
+    c.submissionReason = "manual-terminate";
+    c.terminationReason = String(req.body?.reason || "Manually terminated by administrator").slice(0, 200);
     c.completedAt = new Date();
     c.score = score; c.totalMarks = totalMarks; c.sectionScores = sectionScores; c.passed = false;
     c.answerSheet = answerSheet;
