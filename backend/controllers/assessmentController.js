@@ -6,10 +6,36 @@ const Counter    = require("../models/Counter");
 const { generateUniqueToken } = require("../utils/tokens");
 const { buildLink, queueThankYou, queueDisqualification, flushNow } = require("../utils/emailQueue");
 
-// Generate the next global walk-in test code, e.g. MH001 (never reused).
+// Generate a RANDOM, non-guessable walk-in test code (e.g. MH7K3QP9). Sequential
+// codes let students guess the next drive's code and take it from home — random
+// codes prevent that. Collision-checked so a code is never issued twice.
+const crypto = require("crypto");
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 chars, no ambiguous 0/O/1/I/L
+function randomCode(len) {
+  const bytes = crypto.randomBytes(len);
+  let s = "";
+  for (let i = 0; i < len; i++) s += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return s;
+}
 async function nextTestCode() {
-  const n = await Counter.next("testCode");
-  return `MH${String(n).padStart(3, "0")}`;
+  // Series MH000–MH999, but the code is picked RANDOMLY from the still-free
+  // numbers (never in sequence, never a duplicate of an existing drive).
+  const used = new Set(
+    (await Assessment.find({ testCode: { $regex: /^MH\d{3}$/ } }).select("testCode").lean())
+      .map((a) => a.testCode)
+  );
+  const free = [];
+  for (let i = 0; i < 1000; i++) {
+    const c = `MH${String(i).padStart(3, "0")}`;
+    if (!used.has(c)) free.push(c);
+  }
+  if (free.length) return free[crypto.randomInt(0, free.length)];
+  // MH000–MH999 exhausted (1000 drives) → widen to a longer random code.
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const code = `MH${randomCode(6)}`;
+    if (!(await Assessment.exists({ testCode: code }))) return code;
+  }
+  return `MH${randomCode(9)}`;
 }
 
 const shuffle = (a) => {
