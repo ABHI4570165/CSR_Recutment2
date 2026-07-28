@@ -3,7 +3,7 @@ const {
   createAssessment, listAssessments, getAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleEmails,
   listCandidates, candidateStats, overviewStats, listColleges, updateCandidateStatus, deleteCandidate, getCandidateResume,
-  getCandidateAnswers, terminateCandidate,
+  getCandidateAnswers, terminateCandidate, refreshTestCode,
 } = require("../controllers/assessmentController");
 const { authAdmin, requireFullAdmin } = require("../middleware/auth");
 
@@ -21,6 +21,7 @@ router.get   ("/candidates/:id/resume", authAdmin, getCandidateResume);
 router.get   ("/candidates/:id/answers", authAdmin, getCandidateAnswers);
 router.post  ("/candidates/:id/terminate", authAdmin, requireFullAdmin, terminateCandidate);
 router.delete("/candidates/:id",    authAdmin, requireFullAdmin, deleteCandidate);
+router.post  ("/:id/refresh-code", authAdmin, requireFullAdmin, refreshTestCode);
 router.get   ("/:id",         authAdmin, getAssessment);
 router.put   ("/:id",         authAdmin, requireFullAdmin, updateAssessment);
 router.delete("/:id",         authAdmin, requireFullAdmin, deleteAssessment);

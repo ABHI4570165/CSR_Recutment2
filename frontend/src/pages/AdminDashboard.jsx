@@ -6,7 +6,7 @@ import {
   deleteQuestion, deleteUser, fetchCutoff, fetchSections,
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
-  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers, terminateCandidate,
+  fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers, terminateCandidate, refreshTestCode,
   getSystemStatus, setActiveMode, sendHeartbeat
 } from "../utils/api";
 import "./AdminDashboard.css";
@@ -175,16 +175,16 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
 }
 
 // ── Confirm Modal ─────────────────────────────────────────────────────────────
-function ConfirmModal({ title, message, onConfirm, onCancel, loading }) {
+function ConfirmModal({ title, message, onConfirm, onCancel, loading, confirmLabel="Delete", busyLabel="Deleting…" }) {
   return (
     <div className="ad-overlay" onClick={onCancel}>
       <div className="ad-modal ad-modal--sm" onClick={e=>e.stopPropagation()}>
         <h3 className="ad-modal-title">{title}</h3>
-        <p style={{color:"var(--text-2)",fontSize:14,marginBottom:20}}>{message}</p>
+        <p style={{color:"var(--text-2)",fontSize:14,marginBottom:20,whiteSpace:"pre-line"}}>{message}</p>
         <div style={{display:"flex",gap:10}}>
-          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onCancel}>Cancel</button>
+          <button className="ad-btn ad-btn--outline" style={{flex:1}} onClick={onCancel} disabled={loading}>Cancel</button>
           <button className="ad-btn ad-btn--danger"  style={{flex:1}} onClick={onConfirm} disabled={loading}>
-            {loading?<><Spinner/>Deleting…</>:"Delete"}
+            {loading?<><Spinner/>{busyLabel}</>:confirmLabel}
           </button>
         </div>
       </div>
@@ -1235,7 +1235,7 @@ function DrivesTab() {
     }finally{ setBusy(false); }
   };
   // Modern confirm: runs `fn` after the user confirms in a styled modal.
-  const askConfirm=(title,message,fn,danger=true)=>setConfirmState({title,message,danger,onConfirm:fn});
+  const askConfirm=(title,message,fn,opts={})=>setConfirmState({title,message,onConfirm:fn,...opts});
   const runConfirm=async()=>{
     if(!confirmState?.onConfirm) return;
     setConfirmBusy(true);
@@ -1252,8 +1252,12 @@ function DrivesTab() {
   };
   const removeCand=(id)=>askConfirm("Delete candidate?","This permanently removes the candidate and their attempt. This cannot be undone.",
     async()=>{ await deleteCandidate(id); await loadDriveData(sel._id); showToast({type:"success",title:"Candidate deleted"}); });
-  const terminateCand=(c)=>askConfirm(`Terminate ${c.name}'s test?`,"This ends their live assessment immediately and marks them disqualified. Their answers so far are kept. This cannot be undone.",
-    async()=>{ await terminateCandidate(c._id); await loadDriveData(sel._id); showToast({type:"success",title:`${c.name}'s test terminated`}); });
+  const terminateCand=(c)=>askConfirm(`Terminate ${c.name}'s test?`,
+    "This will immediately end the student's assessment.\n\n• Their current answers will be saved.\n• The assessment cannot be resumed.\n• Their status becomes Terminated.\n• This cannot be undone.\n\nAre you sure you want to terminate this assessment?",
+    async()=>{ await terminateCandidate(c._id); await loadDriveData(sel._id); showToast({type:"success",title:`${c.name}'s assessment terminated successfully`}); },
+    { confirmLabel:"Terminate Test", busyLabel:"Terminating…" });
+  const refreshCode=()=>askConfirm("Refresh test code?",`Issue a NEW random test code for "${sel.name}". Students who have already registered or are currently testing are NOT affected — they use their personal link. Only new registrations will need the new code. Use this between batches to stop code sharing.`,
+    async()=>{ const r=await refreshTestCode(sel._id); setSel(s=>({...s,testCode:r.data.testCode})); await loadDrives(); showToast({type:"success",title:`New test code: ${r.data.testCode}`,lines:[`Previous code (${r.data.previous||"—"}) no longer works for new sign-ups.`,"Students already testing are unaffected."]}); });
   const delDrive=(d)=>askConfirm(`Delete drive "${d.name}"?`,"This also deletes ALL its candidates and cannot be undone.",
     async()=>{ await deleteAssessment(d._id,true); if(sel?._id===d._id) setSel(null); await loadDrives(); showToast({type:"success",title:"Drive deleted"}); });
   const copyLink=(link)=>{ navigator.clipboard?.writeText(link).then(()=>showToast({type:"success",title:"Copied to clipboard"}),()=>{}); };
@@ -1317,6 +1321,7 @@ function DrivesTab() {
   const confirmEl = (
     <>
       {confirmState && <ConfirmModal title={confirmState.title} message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel} busyLabel={confirmState.busyLabel}
         onConfirm={runConfirm} onCancel={()=>setConfirmState(null)} loading={confirmBusy} />}
       {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
       {profileCand && <CandidateProfile candidate={profileCand} onClose={()=>setProfileCand(null)} />}
@@ -1461,7 +1466,9 @@ function DrivesTab() {
         <span><strong>End:</strong> {fmtTimeOnly(sel.endAt)}</span>
         {isWalkIn ? (
           <>
-            <span style={{color:"#7C3AED",fontWeight:700}}><strong>Test Code:</strong> {sel.testCode||"—"}</span>
+            <span style={{color:"#7C3AED",fontWeight:700}}><strong>Test Code:</strong> {sel.testCode||"—"}
+              {!isViewer() && <button className="ad-btn ad-btn--sm ad-btn--outline" style={{marginLeft:8}} title="Issue a new code for the next batch. Students already testing are NOT affected." onClick={refreshCode}>🔄 Refresh Code</button>}
+            </span>
             <span><strong>Capacity:</strong> {sel.walkInCount||0}{sel.maxCandidates!=null?` / ${sel.maxCandidates}`:" (unlimited)"}</span>
           </>
         ) : (

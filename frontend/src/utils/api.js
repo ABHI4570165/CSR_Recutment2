@@ -191,6 +191,7 @@ export const deleteCandidate      = (id)    => adminApi.delete(`/assessments/can
 export const downloadResume       = (id)    => adminApi.get(`/assessments/candidates/${id}/resume`, { responseType: "blob" });
 export const fetchCandidateAnswers = (id)   => adminApi.get(`/assessments/candidates/${id}/answers`);
 export const terminateCandidate    = (id, reason) => adminApi.post(`/assessments/candidates/${id}/terminate`, { reason });
+export const refreshTestCode       = (id) => adminApi.post(`/assessments/${id}/refresh-code`);
 export const downloadResumeFile   = (id)    => adminApi.get(`/assessments/candidates/${id}/resume?download=1`, { responseType: "blob" });
 
 // ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────

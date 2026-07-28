@@ -150,6 +150,27 @@ exports.getAssessment = async (req, res) => {
   }
 };
 
+// POST /api/assessments/:id/refresh-code — issue a NEW random test code for a
+// walk-in drive (between batches, to stop code leaking). Already-registered
+// students are UNAFFECTED — they take the test via their personal token link,
+// not the code; the code is only used for NEW registrations.
+exports.refreshTestCode = async (req, res) => {
+  try {
+    const a = await Assessment.findById(req.params.id);
+    if (!a) return res.status(404).json({ success: false, message: "Drive not found." });
+    if (a.driveType !== "WALK_IN") {
+      return res.status(400).json({ success: false, message: "Only walk-in drives have a test code." });
+    }
+    const previous = a.testCode || null;
+    a.testCode = await nextTestCode();   // random, unique
+    await a.save();
+    res.json({ success: true, testCode: a.testCode, previous, message: `Test code changed to ${a.testCode}.` });
+  } catch (err) {
+    console.error("refreshTestCode:", err);
+    res.status(500).json({ success: false, message: "Failed to refresh test code." });
+  }
+};
+
 exports.updateAssessment = async (req, res) => {
   try {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
@@ -639,10 +660,14 @@ function pickCand(c) {
 // student's exam page ends within one auto-save cycle (or on refresh).
 exports.terminateCandidate = async (req, res) => {
   try {
+    console.log("[terminate] candidate:", req.params.id);
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid candidate id." });
+    }
     const c = await Candidate.findById(req.params.id);
     if (!c) return res.status(404).json({ success: false, message: "Candidate not found." });
-    if (!["started", "in-progress"].includes(c.status)) {
-      return res.status(400).json({ success: false, message: `Cannot terminate — candidate is already '${c.status}'.` });
+    if (["completed", "shortlisted", "rejected", "disqualified"].includes(c.status)) {
+      return res.status(409).json({ success: false, message: `Assessment already ended (status: ${c.status}).` });
     }
     const prog = c.progress || {};
     const qids = prog.questionOrder || [];
@@ -675,10 +700,15 @@ exports.terminateCandidate = async (req, res) => {
     c.progress = undefined;
     c.completionEmail = { status: "pending", scheduledAt: new Date(), attempts: 0 };
     await c.save();
-    res.json({ success: true, message: `${c.name}'s assessment was terminated.`, data: { name: c.name } });
+    console.log(`[terminate] done: ${c.name} → disqualified (${score}/${totalMarks})`);
+    res.json({ success: true, message: `${c.name}'s assessment was terminated.`, data: { name: c.name, status: c.status } });
   } catch (err) {
-    console.error("terminateCandidate:", err);
-    res.status(500).json({ success: false, message: "Failed to terminate candidate." });
+    console.error("terminateCandidate error:", err?.name, err?.message, err);
+    // Surface validation errors instead of a generic 500 so the cause is visible.
+    if (err?.name === "ValidationError") {
+      return res.status(400).json({ success: false, message: `Validation failed: ${err.message}` });
+    }
+    res.status(500).json({ success: false, message: "Failed to terminate the assessment. Please try again." });
   }
 };
 

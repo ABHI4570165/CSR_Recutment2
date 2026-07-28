@@ -153,7 +153,7 @@ const candidateSchema = new mongoose.Schema({
   passed:           { type: Boolean, default: null },
   sectionScores:    { type: Map, of: Number, default: {} },
   timeTakenSeconds: { type: Number, default: null },
-  submissionReason: { type: String, enum: ["manual", "timed-out", "auto-malpractice", "disqualified"], default: undefined },
+  submissionReason: { type: String, enum: ["manual", "timed-out", "auto-malpractice", "disqualified", "manual-terminate"], default: undefined },
 
   // Anti-malpractice
   violations: { type: violationsSchema, default: () => ({}) },
