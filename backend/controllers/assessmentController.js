@@ -902,17 +902,20 @@ exports.getCandidate = async (req, res) => {
     if (c.status === "completed" || c.status === "shortlisted" || c.status === "rejected") {
       return res.json({ success: true, state: "completed", data: view });
     }
-    if (c.tokenExpiresAt && new Date(c.tokenExpiresAt).getTime() < now()) {
-      return res.json({ success: true, state: "expired", data: view });
-    }
-    // Resume takes priority over the window so an in-flight attempt can always continue.
+    // Resume ALWAYS wins — an in-flight attempt can continue regardless of a stale
+    // per-candidate token, so a mid-exam student is never wrongly "expired".
     if (c.status === "in-progress" && c.progress) {
       return res.json({ success: true, state: "in-progress", data: view });
     }
-    // Time-window gating (only if the drive defines a window)
+    // The DRIVE WINDOW is the authority. Never expire a candidate while the drive's
+    // end time is still in the future — a stale tokenExpiresAt must not block them.
     const ws = windowState(assessment);
     if (ws === "not-started") return res.json({ success: true, state: "not-started", data: view });
     if (ws === "window-expired") return res.json({ success: true, state: "expired", data: view });
+    // Legacy drives with no window fall back to the per-candidate token expiry.
+    if (!assessment.endAt && !assessment.deadline && c.tokenExpiresAt && new Date(c.tokenExpiresAt).getTime() < now()) {
+      return res.json({ success: true, state: "expired", data: view });
+    }
 
     res.json({ success: true, state: "ready", data: view });
   } catch (err) {
@@ -934,11 +937,8 @@ exports.startCandidate = async (req, res) => {
     if (["completed", "shortlisted", "rejected"].includes(c.status)) {
       return res.status(409).json({ success: false, state: "completed", message: "This assessment has already been completed." });
     }
-    if (c.tokenExpiresAt && new Date(c.tokenExpiresAt).getTime() < now()) {
-      return res.status(410).json({ success: false, state: "expired", message: "This assessment link has expired." });
-    }
-
-    // Resume path — allowed even outside the window so an in-flight attempt can continue.
+    // Resume path — ALWAYS allowed for an in-flight attempt (never blocked by a
+    // stale token), even outside the window, so a mid-exam student can continue.
     if (c.status === "in-progress" && c.progress?.questionOrder?.length) {
       const questions = await rehydratePaper(c.progress, assessment);
       const answers = c.progress.answers instanceof Map
@@ -962,6 +962,10 @@ exports.startCandidate = async (req, res) => {
     }
     if (ws === "window-expired") {
       return res.status(410).json({ success: false, state: "expired", message: "This assessment window has expired." });
+    }
+    // Legacy drives with no window fall back to the per-candidate token expiry.
+    if (!assessment.endAt && !assessment.deadline && c.tokenExpiresAt && new Date(c.tokenExpiresAt).getTime() < now()) {
+      return res.status(410).json({ success: false, state: "expired", message: "This assessment link has expired." });
     }
 
     // ── Batch B: geolocation gate (server-authoritative distance) ──────────────
