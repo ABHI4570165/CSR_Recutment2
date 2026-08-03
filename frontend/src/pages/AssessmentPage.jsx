@@ -187,6 +187,7 @@ export default function AssessmentPage() {
   const [gateMsg, setGateMsg] = useState("");
   const [resumeMode, setResumeMode] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  const [dndAck, setDndAck] = useState(false);  // acknowledges Do-Not-Disturb + other apps closed
   const [finished, setFinished] = useState(false);
   // Camera + face verification
   const [camReady, setCamReady] = useState(false);
@@ -1060,14 +1061,21 @@ export default function AssessmentPage() {
                 {camDenied && <button className="asmt-cam-retry" onClick={() => startCamera()}>Retry camera</button>}
               </div>
             )}
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 14px", margin: "14px 0", fontSize: 13.5, lineHeight: 1.55, color: "#92400e" }}>
+              🔕 <strong>Before you start:</strong> turn on <strong>Do Not Disturb / Focus Assist</strong> and <strong>close all other apps</strong> (WhatsApp, email, browser tabs, etc.). Pop-up notifications during the test can interrupt you. Once you begin, stay on this screen until you submit.
+            </div>
             <label className="asmt-agree">
               <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} />
               <span>I have read and understood all assessment instructions.</span>
             </label>
+            <label className="asmt-agree">
+              <input type="checkbox" checked={dndAck} onChange={e => setDndAck(e.target.checked)} />
+              <span>I have turned on Do Not Disturb and closed all other applications.</span>
+            </label>
             {gateMsg && <div className="asmt-gate-err">{gateMsg}</div>}
             <div className="asmt-rules-actions">
               <button className="asmt-btn-ghost" onClick={() => { stopCamera(); setPhase(resumeMode ? "resume" : "ready"); }}>Back</button>
-              <button className="asmt-start-btn" style={{ flex: 1 }} disabled={!agreed} onClick={enterAndStart}>
+              <button className="asmt-start-btn" style={{ flex: 1 }} disabled={!agreed || !dndAck} onClick={enterAndStart}>
                 Proceed to Assessment
               </button>
             </div>
