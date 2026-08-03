@@ -15,6 +15,7 @@ const QuizPage       = lazy(() => import("./pages/QuizPage"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AssessmentPage = lazy(() => import("./pages/AssessmentPage"));
 const WalkInPortal   = lazy(() => import("./pages/WalkInPortal"));
+const LiveProctoring = lazy(() => import("./pages/LiveProctoring"));
 const ErrorPage      = lazy(() => import("./pages/ErrorPage"));
 
 const Loading = () => (
@@ -31,6 +32,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           {/* Admin (full) + Viewer (read-only) — on hard-to-guess paths, password protected. */}
           <Route path={`/${ADMIN_PATH}`}  element={<AdminDashboard mode="admin" />} />
           <Route path={`/${VIEWER_PATH}`} element={<AdminDashboard mode="viewer" />} />
+          {/* Live proctoring (admin only — guarded by adminToken inside the page). */}
+          <Route path={`/${ADMIN_PATH}/live`} element={<LiveProctoring />} />
 
           {/* Public candidate flows. */}
           <Route path="/test"               element={<WalkInPortal />} />

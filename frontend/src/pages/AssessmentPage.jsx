@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useParams } from "react-router-dom";
 import { getCandidate, startCandidate, saveCandidate, submitCandidate } from "../utils/api";
 import { loadFaceDetector, detectFaceCount, FACE_MESSAGES } from "../utils/faceDetection";
+import { useStudentBroadcast } from "../webrtc/useStudentBroadcast";
 import "./QuizPage.css";
 import "./AssessmentPage.css";
 
@@ -206,6 +207,7 @@ export default function AssessmentPage() {
   const [showConf, setShowConf] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [camOn, setCamOn] = useState(false);
+  const [proctorStream, setProctorStream] = useState(null); // same webcam stream, streamed live P2P to admin (not recorded)
   const [saveState, setSaveState] = useState("idle"); // idle|saving|saved
   const [lastSaved, setLastSaved] = useState(null);    // Date
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
@@ -217,6 +219,13 @@ export default function AssessmentPage() {
   const submitted = useRef(false);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
+
+  // ── Live proctoring: broadcast the webcam P2P to the admin dashboard while the
+  // exam is running. Media is peer-to-peer, never recorded or stored on our servers.
+  const { sendUpdate: sendProctorUpdate } = useStudentBroadcast({ token, stream: proctorStream, enabled: phase === "quiz" });
+  useEffect(() => {
+    sendProctorUpdate({ violations: violCount, cameraOn: camOn, currentQuestion: curQ });
+  }, [violCount, camOn, curQ, sendProctorUpdate]);
   const answersRef = useRef({});
   const reviewRef = useRef(new Set());
   const visitedRef = useRef(new Set());
@@ -313,6 +322,7 @@ export default function AssessmentPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 }, audio: false });
       streamRef.current = stream;
+      setProctorStream(stream);   // enable live proctoring broadcast (P2P, never recorded)
       setCamOn(true); setCamReady(true); setCamDenied(false);
       return true;
     } catch {
@@ -332,6 +342,7 @@ export default function AssessmentPage() {
       streamRef.current?.getTracks().forEach(t => { try { t.stop(); } catch { /* ignore */ } });
     } catch { /* ignore */ }
     streamRef.current = null;
+    setProctorStream(null);
     if (videoRef.current) videoRef.current.srcObject = null;
     setCamOn(false); setCamReady(false);
   }

@@ -161,8 +161,20 @@ app.use((err, _req, res, _next) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// Wrap Express in an HTTP server so the live-proctoring Socket.IO signaling can
+// attach to the same port. Signaling is only active on the instance the frontend
+// points VITE_SIGNALING_URL at; the others simply carry no socket clients.
+const http = require("http");
+const httpServer = http.createServer(app);
+try {
+  const { attachSignaling } = require("./signaling");
+  attachSignaling(httpServer, ALLOWED_ORIGINS);
+} catch (e) {
+  console.warn("⚠️   Live proctoring signaling not attached:", e.message);
+}
+
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () =>
+httpServer.listen(PORT, "0.0.0.0", () =>
   console.log(
     `🚀  Server on port ${PORT} [${process.env.NODE_ENV || "development"}] PID:${process.pid}`
   )
