@@ -87,8 +87,11 @@ export default function WalkInPortal() {
     setErr(""); setFieldErr((fe) => ({ ...fe, resume: "" }));
   };
 
-  // Round 2 drives collect only Name, Email and Mobile — no college/USN/Aadhaar/resume.
+  // Round 2 collects Name/Email/Mobile PLUS any extra fields the drive is configured
+  // to collect (walkInFields). Round 1 keeps the full mandatory form.
   const isRound2 = Number(drive?.round) === 2;
+  const wf = Array.isArray(drive?.walkInFields) ? drive.walkInFields : [];
+  const wantResume = !isRound2 || wf.includes("resume");
 
   const validate = () => {
     const fe = {};
@@ -107,6 +110,15 @@ export default function WalkInPortal() {
       else if (!AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "Enter a 12-digit Aadhaar number";
       if (form.dob && new Date(form.dob) > new Date()) fe.dob = "Date of birth cannot be in the future";
       if (!resume) fe.resume = "Resume is required (PDF, DOC or DOCX)";
+    } else {
+      // Round 2: validate only the configured extra fields.
+      wf.forEach((k) => {
+        if (k === "resume") return;
+        if (!String(form[k] || "").trim()) fe[k] = "Required";
+      });
+      if (wf.includes("aadhaar") && form.aadhaar.trim() && !AADHAAR_RE.test(form.aadhaar.replace(/\s/g, ""))) fe.aadhaar = "Enter a 12-digit Aadhaar number";
+      if (wf.includes("dob") && form.dob && new Date(form.dob) > new Date()) fe.dob = "Date of birth cannot be in the future";
+      if (wf.includes("resume") && !resume) fe.resume = "Resume is required (PDF, DOC or DOCX)";
     }
     return fe;
   };
@@ -224,10 +236,10 @@ export default function WalkInPortal() {
 
               <div className="wp-grid">
                 {(isRound2
-                  ? FIELDS.filter(f => ["name", "email", "phone"].includes(f[0]))
+                  ? FIELDS.filter(f => ["name", "email", "phone"].includes(f[0]) || wf.includes(f[0]))
                   : FIELDS.filter(f => f[0] !== "testCode")
                 ).map(inputFor)}
-                {!isRound2 && (
+                {wantResume && (
                   <div className="wp-field wp-field--full">
                     <label className="wp-label">Resume (PDF, DOC or DOCX · max {MAX_RESUME_MB} MB)<span className="wp-req"> *</span></label>
                     <input className={`wp-input ${fieldErr.resume ? "wp-input--err" : ""}`} type="file" accept=".pdf,.doc,.docx" onChange={onResume} />

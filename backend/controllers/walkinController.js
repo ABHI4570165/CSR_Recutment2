@@ -32,7 +32,8 @@ function publicDrive(d) {
   return {
     assessmentName: d.name,
     durationMinutes: d.durationMinutes,
-    round: Number(d.round) || 1,   // 2 → walk-in form collects only name/email/mobile
+    round: Number(d.round) || 1,   // 2 → walk-in form collects name/email/mobile + walkInFields
+    walkInFields: Array.isArray(d.walkInFields) ? d.walkInFields : [],  // extra fields to collect (round 2)
     college: d.college || "",
     colleges: Array.isArray(d.colleges) ? d.colleges : [],   // walk-in college dropdown options
     startAt: d.startAt || null,
@@ -131,18 +132,20 @@ exports.registerWalkIn = async (req, res) => {
     if (r.error) return res.status(r.code).json({ success: false, message: r.error });
     const drive = r.drive;
 
-    // Round 2 collects only name, email and mobile. Round 1 keeps the full form.
+    // Round 2 collects name/email/mobile PLUS whatever extra fields the drive is
+    // configured to collect (walkInFields, e.g. resume/college). Round 1 keeps the
+    // full form. Empty walkInFields on a round-2 drive = name/email/mobile only.
     const isRound2 = Number(drive.round) === 2;
+    const wf = Array.isArray(drive.walkInFields) ? drive.walkInFields : [];
+    const wantCollege = !isRound2 || wf.includes("college");
+    const wantResume = !isRound2 || wf.includes("resume");
     const phone = String(b.phone || "").trim();
     let college = String(b.college || "").trim();
-    if (isRound2) {
-      if (!/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: "A valid 10-digit mobile number is required." });
-      if (!college) college = "—";   // Candidate model requires a college; placeholder for round 2
-    } else if (!college) {
-      return res.status(400).json({ success: false, message: "College name is required." });
-    }
+    if (isRound2 && !/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: "A valid 10-digit mobile number is required." });
+    if (wantCollege && !college) return res.status(400).json({ success: false, message: "College name is required." });
+    if (!college) college = "—";   // Candidate model requires a college; placeholder when not collected
 
-    const parsedResume = isRound2 ? undefined : parseResume(b.resume);
+    const parsedResume = wantResume ? parseResume(b.resume) : undefined;
     if (parsedResume && parsedResume._tooBig) return res.status(413).json({ success: false, message: "Resume is too large (max 5 MB)." });
 
     // ── RE-ENTRY / RESUME ──────────────────────────────────────────────────────

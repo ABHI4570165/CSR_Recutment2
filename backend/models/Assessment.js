@@ -37,6 +37,9 @@ const assessmentSchema = new mongoose.Schema({
   // Round-2 question sets this drive draws from, assigned to candidates in
   // round-robin order (e.g. ["C","D"]). Defaults to ["A","B"] for older drives.
   round2Sets:         { type: [String], default: undefined },
+  // Extra walk-in registration fields to collect for this drive (beyond the always-on
+  // name/email/mobile), e.g. ["resume","college"]. Empty = name/email/mobile only.
+  walkInFields:       { type: [String], default: undefined },
   deadline:           { type: Date },                  // legacy link expiry (kept for back-compat)
   isActive:           { type: Boolean, default: true },
 

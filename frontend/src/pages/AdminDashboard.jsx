@@ -777,12 +777,19 @@ const ROUND2_PAPERS = {
   A: { label:ROUND2_VERSIONS.A.label, sets:["A","B"], sections:ROUND2_SECTIONS },
   B: { label:ROUND2_VERSIONS.B.label, sets:["C","D"], sections:ROUND2_SECTIONS_CD },
 };
+// Extra fields an admin can choose to collect at Round-2 walk-in registration
+// (beyond the always-on Name / Email / Mobile).
+const WALKIN_FIELD_OPTS = [
+  ["resume","Resume"], ["college","College"], ["usn","USN"], ["course","Course"], ["branch","Branch"],
+  ["gender","Gender"], ["dob","Date of Birth"], ["aadhaar","Aadhaar"], ["location","Location"],
+];
 
 function CreateDriveModal({ sections, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
   const [round,setRound]=useState(1);
   const [round2Paper,setRound2Paper]=useState("B");   // default to Version B (Sets C&D · 40 Q); A = Sets A&B · 30 Q
+  const [walkInFields,setWalkInFields]=useState([]);  // extra registration fields to collect (round 2 walk-in)
   const [maxCandidates,setMaxCandidates]=useState("");
   const [duration,setDuration]=useState(40);
   const [passing,setPassing]=useState(30);
@@ -818,6 +825,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
       await createAssessment({
         name:name.trim(), driveType, round, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
         ...(round===2 ? { round2Sets: paper.sets } : {}),
+        ...(round===2 && walkInFields.length ? { walkInFields } : {}),
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
@@ -914,6 +922,20 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
                 </select>
                 <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D. Each candidate gets ONE set, alternating between students.</span>
               </div>
+              {driveType==="WALK_IN" && (
+                <div className="ad-field">
+                  <label className="ad-label">Extra details to collect at registration</label>
+                  <span className="ad-hint" style={{display:"block",marginBottom:8}}>Walk-in Round 2 always collects <strong>Name, Email &amp; Mobile</strong>. Tick any extra fields to also collect — e.g. <strong>Resume</strong> for pre-registered students who never submitted one.</span>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {WALKIN_FIELD_OPTS.map(([k,label])=>{ const on=walkInFields.includes(k); return (
+                      <label key={k} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,background:on?"#e0e7ff":"#f1f5f9",border:`1px solid ${on?"#818cf8":"#e2e8f0"}`,borderRadius:8,padding:"6px 10px",cursor:"pointer"}}>
+                        <input type="checkbox" checked={on} onChange={e=>setWalkInFields(p=>e.target.checked?[...p,k]:p.filter(x=>x!==k))} />
+                        {label}
+                      </label>
+                    );})}
+                  </div>
+                </div>
+              )}
               <div className="ad-note ad-note--info" style={{marginTop:10}}>
                 <strong>Selected: {ROUND2_PAPERS[round2Paper]?.label}.</strong> Questions are jumbled within each section; MCQ options shuffled.
                 SQL questions show their reference tables. Edit these in the <strong>Questions</strong> tab (Round 2 · Version {round2Paper} → Set {ROUND2_PAPERS[round2Paper]?.sets.join(" / ")}).

@@ -90,6 +90,8 @@ exports.createAssessment = async (req, res) => {
       ...(Number(b.round) === 2 ? { round: 2 } : {}),   // Round 2 = fed technical sets
       ...(Number(b.round) === 2 && Array.isArray(b.round2Sets) && b.round2Sets.length
         ? { round2Sets: b.round2Sets.map(s => String(s).trim().toUpperCase()).filter(Boolean) } : {}),
+      ...(Array.isArray(b.walkInFields) && b.walkInFields.length
+        ? { walkInFields: b.walkInFields.map(s => String(s).trim()).filter(Boolean) } : {}),
 
       ...(deadline ? { deadline: new Date(deadline) } : {}),
       // Scheduling window
@@ -176,7 +178,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round", "round2Sets"];
+      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round", "round2Sets", "walkInFields"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });
