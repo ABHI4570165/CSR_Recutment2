@@ -251,18 +251,22 @@ function shortlistHtml({ name, dateStr, timeStr }) {
 }
 
 // ── Assessment-link email (sent at the configured time) ───────────────────────
-function linkReadyHtml({ name, dateStr, timeStr, link }) {
+function linkReadyHtml({ name, dateStr, timeStr, endStr, link }) {
   const safeLink = encodeURI(String(link || ""));
+  const windowLine = endStr
+    ? `The test portal is <strong>open until ${esc(endStr)}</strong> on ${esc(dateStr)} — you can take the test <strong>any time within this time slot</strong>. Once you start, please finish in one sitting.`
+    : `The test portal is open through the scheduled window — you can take the test <strong>any time within the slot</strong>. Once you start, please finish in one sitting.`;
   const inner = `
     <div style="padding:32px 28px;">
       <h2 style="color:#111827;font-size:19px;margin:0 0 10px;">Dear ${esc(name)},</h2>
       <p style="color:#4b5563;font-size:14px;line-height:1.6;margin:0 0 18px;">Your assessment is scheduled as follows:</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;font-size:14px;margin-bottom:16px;">
         <tr><td style="padding:12px 16px;color:#6b7280;width:30%;">Date</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(dateStr)}</td></tr>
-        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Start Time</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
+        <tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Portal opens</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(timeStr)}</td></tr>
+        ${endStr ? `<tr style="border-top:1px solid #e5e7eb;"><td style="padding:12px 16px;color:#6b7280;">Portal closes</td><td style="padding:12px 16px;color:#111827;font-weight:700;">${esc(endStr)}</td></tr>` : ""}
       </table>
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:18px;">
-        <p style="color:#1e40af;font-size:13.5px;margin:0;line-height:1.6;">⏰ The assessment <strong>starts at ${esc(timeStr)}</strong>. Please log in a few minutes early and be ready by then.</p>
+        <p style="color:#1e40af;font-size:13.5px;margin:0;line-height:1.6;">⏰ ${windowLine}</p>
       </div>
       <p style="color:#4b5563;font-size:14px;margin:0 0 14px;">You may now access your assessment using the link below:</p>
       <div style="text-align:center;margin:18px 0;">
@@ -352,11 +356,15 @@ function whatsappBlock() {
 async function sendLinkEmail(candidate, assessment, link) {
   const dateStr = fmtDateOnly(assessment.assessmentDate || assessment.startAt);
   const timeStr = assessment.startAt ? fmtTimeOnly(assessment.startAt) : "as scheduled";
+  const endStr = (assessment.endAt || assessment.deadline) ? fmtTimeOnly(assessment.endAt || assessment.deadline) : null;
+  const windowText = endStr
+    ? `The test portal is open until ${endStr} on ${dateStr} — you can take the test any time within this time slot.`
+    : `You can take the test any time within the scheduled window.`;
   return sendMail({
     to: candidate.email,
     subject: `Your Assessment Link Is Ready | ${BRAND}`,
-    html: linkReadyHtml({ name: candidate.name, dateStr, timeStr, link }),
-    text: `Dear ${candidate.name},\n\nYour assessment is scheduled on ${dateStr}. Start Time: ${timeStr}. The assessment starts at ${timeStr} — please log in a few minutes early.\n\nOpen your assessment: ${link}\n\nEnsure fullscreen, webcam, and a stable connection. Attempt only within the scheduled window.\n\n${BRAND} · ${HIRING_PARTNER}`,
+    html: linkReadyHtml({ name: candidate.name, dateStr, timeStr, endStr, link }),
+    text: `Dear ${candidate.name},\n\nYour assessment is scheduled on ${dateStr}. Portal opens: ${timeStr}${endStr ? `, closes: ${endStr}` : ""}.\n${windowText}\n\nOpen your assessment: ${link}\n\nEnsure fullscreen, webcam, and a stable connection. Once you start, finish in one sitting.\n\n${BRAND} · ${HIRING_PARTNER}`,
   });
 }
 // Back-compat alias — older code/imports call sendInvitationEmail.
