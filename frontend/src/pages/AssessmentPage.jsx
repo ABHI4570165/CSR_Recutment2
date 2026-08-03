@@ -767,24 +767,34 @@ export default function AssessmentPage() {
         else if (idle >= limit * 0.75) setFaceWarn("You appear inactive — interact to avoid termination.");
       }, 3000);
     }
-    // DevTools detection — calibrated so normal browser chrome (tabs, toolbar,
-    // bookmarks bar, title bar) does NOT false-trigger. We track the SMALLEST
-    // outer-inner gap seen (that's the chrome with devtools closed); opening a
-    // devtools panel adds a large NEW gap on top of it.
+    // DevTools detection — hardened against false positives. We track the SMALLEST
+    // outer-inner gap (chrome with devtools closed); a docked devtools panel adds a
+    // large NEW gap. To avoid flagging transient viewport changes (plugging in a
+    // charger changes display DPI/resolution/refresh; OS notification banners; brief
+    // resizes/zoom), we (a) RE-BASELINE whenever the screen metrics change, and
+    // (b) require the large gap to PERSIST for several consecutive checks (~6s) —
+    // devtools stays docked, a blip does not.
     let devIv = null;
     if (sec.devToolsDetection !== false) {
-      let cooldown = 0;
-      let baseW = window.outerWidth - window.innerWidth;
-      let baseH = window.outerHeight - window.innerHeight;
+      let cooldown = 0, streak = 0;
+      const gapW = () => window.outerWidth - window.innerWidth;
+      const gapH = () => window.outerHeight - window.innerHeight;
+      let baseW = gapW(), baseH = gapH();
+      let lastScreen = `${screen.width}x${screen.height}@${window.devicePixelRatio}`;
       devIv = setInterval(() => {
         if (submitted.current) return;
-        const curW = window.outerWidth - window.innerWidth;
-        const curH = window.outerHeight - window.innerHeight;
-        baseW = Math.min(baseW, curW);   // baseline = chrome-only gap (min observed)
-        baseH = Math.min(baseH, curH);
-        // Only a large gap ABOVE the baseline indicates a docked devtools panel.
-        const open = (curW - baseW) > 180 || (curH - baseH) > 180;
-        if (open && Date.now() > cooldown) { cooldown = Date.now() + 5000; recordViolation("devtools", "tab", "Developer tools opened"); }
+        // Display changed (charger/power state, monitor, DPI/zoom) → recalibrate,
+        // never a violation.
+        const scr = `${screen.width}x${screen.height}@${window.devicePixelRatio}`;
+        if (scr !== lastScreen) { lastScreen = scr; baseW = gapW(); baseH = gapH(); streak = 0; return; }
+        const curW = gapW(), curH = gapH();
+        baseW = Math.min(baseW, curW); baseH = Math.min(baseH, curH);
+        const elevated = (curW - baseW) > 200 || (curH - baseH) > 200;
+        streak = elevated ? streak + 1 : 0;          // reset the moment it's normal again
+        if (streak >= 4 && Date.now() > cooldown) {  // ~6s of a SUSTAINED docked panel
+          cooldown = Date.now() + 8000; streak = 0;
+          recordViolation("devtools", "tab", "Developer tools opened");
+        }
       }, 1500);
     }
 
