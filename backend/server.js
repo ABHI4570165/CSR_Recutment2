@@ -39,6 +39,11 @@ const corsOptions = {
     // Allow no-origin requests (curl, Render health pings, same-origin)
     if (!origin) return cb(null, true);
 
+    // Always allow localhost / 127.0.0.1 on ANY port — local dev (Vite may pick
+    // 5173, 5174, 5175… if a port is taken). A browser only sends a localhost
+    // origin from the same machine, so this is safe even in production.
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true);
+
     // Always allow in development
     if (process.env.NODE_ENV !== "production") return cb(null, true);
 
@@ -96,6 +101,14 @@ mongoose.connect(process.env.MONGO_URI, {
   // Start the Assessment Active Mode auto-off scheduler.
   try { require("./controllers/systemController").startAutoOffScheduler(); }
   catch (e) { console.warn("Active-mode scheduler not started:", e.message); }
+  // Start the server-side keep-awake self-ping (runs only while Active Mode is ON,
+  // so servers stay awake even with the admin's laptop closed, and sleep when OFF).
+  try { require("./utils/keepAlive").startKeepAliveScheduler(); }
+  catch (e) { console.warn("Keep-alive scheduler not started:", e.message); }
+  // Start the timed-out auto-submit safety net: finalizes students whose time
+  // ran out but whose browser never submitted (laptop closed / network drop).
+  try { require("./controllers/assessmentController").startTimeoutAutoSubmitScheduler(); }
+  catch (e) { console.warn("Auto-submit scheduler not started:", e.message); }
 }).catch((err) => { console.error("❌  MongoDB:", err.message); process.exit(1); });
 
 // ── STEP 5: Redis (optional) ──────────────────────────────────────────────────

@@ -30,9 +30,17 @@ function studentPublic(s) {
 }
 
 function attachSignaling(httpServer, allowedOrigins) {
+  const originCheck = (origin, cb) => {
+    if (!origin) return cb(null, true);
+    // Always allow localhost / 127.0.0.1 on any port (local dev, Vite any port).
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true);
+    if (!allowedOrigins || !allowedOrigins.length) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error("Origin not allowed"));
+  };
   const io = new Server(httpServer, {
     path: "/proctor-socket",
-    cors: { origin: allowedOrigins && allowedOrigins.length ? allowedOrigins : true, credentials: true },
+    cors: { origin: originCheck, credentials: true },
     maxHttpBufferSize: 1e6,
   });
 

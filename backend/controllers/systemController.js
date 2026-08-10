@@ -41,9 +41,21 @@ exports.getStatus = async (_req, res) => {
 // POST /api/system/active-mode  { on, extend? }
 exports.setActiveMode = async (req, res) => {
   try {
-    const { on, extend } = req.body || {};
+    const { on, extend, autoOffAt } = req.body || {};
     const by = req.admin?.username || "admin";
     const doc = await SystemConfig.getSingleton();
+
+    // Optional custom shutoff time (absolute instant, sent as ISO by the browser
+    // so there is no server-timezone confusion). Must be a valid future time.
+    let customOff;
+    if (autoOffAt != null && autoOffAt !== "") {
+      const t = new Date(autoOffAt);
+      if (isNaN(t.getTime()))
+        return res.status(400).json({ success: false, message: "Invalid auto-off time." });
+      if (t.getTime() <= Date.now())
+        return res.status(400).json({ success: false, message: "Auto-off time must be in the future." });
+      customOff = t;
+    }
 
     if (extend) {
       const base = doc.autoOffAt && new Date(doc.autoOffAt) > new Date() ? new Date(doc.autoOffAt) : new Date();
@@ -51,10 +63,12 @@ exports.setActiveMode = async (req, res) => {
       doc.autoOffAt = new Date(base.getTime() + EXTEND_MS);
       pushLog(doc, "extended", by);
     } else if (on) {
+      // Enable (or, if already active, just reschedule the shutoff time).
+      const wasActive = doc.activeMode;
       doc.activeMode = true;
-      doc.activatedAt = new Date();
-      doc.autoOffAt = computeAutoOff();
-      pushLog(doc, "enabled", by);
+      if (!wasActive) doc.activatedAt = new Date();
+      doc.autoOffAt = customOff || computeAutoOff();   // custom time wins; else default 10 PM
+      pushLog(doc, wasActive ? "rescheduled" : "enabled", by);
     } else {
       doc.activeMode = false;
       doc.autoOffAt = undefined;

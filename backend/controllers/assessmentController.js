@@ -1066,6 +1066,40 @@ exports.saveProgress = async (req, res) => {
   }
 };
 
+// Pure scorer — grades a saved attempt. Shared by the live submit path AND the
+// server-side timeout auto-submit so both grade identically (no divergence).
+function scoreAttempt(qids, qmap, answers, optionOrder, sections) {
+  let score = 0, totalMarks = 0;
+  const sectionScores = {};
+  (sections || []).forEach(s => { sectionScores[s.name] = 0; });
+  const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const answerSheet = [];
+  (qids || []).forEach(qid => {
+    const q = qmap[qid];
+    if (!q) return;
+    totalMarks += q.marks || 1;
+    const ans = answers[qid];
+    const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
+    let correct = false, given = null;
+    if (ans != null && ans !== "") {
+      if (q.type === "text") {
+        given = String(ans);
+        correct = q.answerText != null && norm(ans) === norm(q.answerText);
+      } else {
+        const origIdx = (optionOrder[qid] || [])[ans];
+        given = origIdx != null && q.options ? (q.options[origIdx] ?? null) : null;
+        correct = origIdx === q.correctIndex;
+      }
+      if (correct) {
+        score += q.marks || 1;
+        sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
+      }
+    }
+    answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
+  });
+  return { score, totalMarks, sectionScores, answerSheet };
+}
+
 // POST /api/candidate/:token/submit
 // Body: { answers:{qid:displayIdx}, timedOut?, reason?, violations? }
 exports.submitCandidate = async (req, res) => {
@@ -1092,35 +1126,8 @@ exports.submitCandidate = async (req, res) => {
     const qmap = {};
     docs.forEach(q => { qmap[String(q._id)] = q; });
 
-    let score = 0, totalMarks = 0;
-    const sectionScores = {};
-    (assessment.sections || []).forEach(s => { sectionScores[s.name] = 0; });
-
-    const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-    const answerSheet = [];   // per-question record kept so admins can review answers
-    qids.forEach(qid => {
-      const q = qmap[qid];
-      if (!q) return;
-      totalMarks += q.marks || 1;
-      const ans = answers[qid];
-      const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
-      let correct = false, given = null;
-      if (ans != null && ans !== "") {
-        if (q.type === "text") {
-          given = String(ans);
-          correct = q.answerText != null && norm(ans) === norm(q.answerText); // typed exact-output answer
-        } else {
-          const origIdx = (optionOrder[qid] || [])[ans];                      // mcq: map display→original
-          given = origIdx != null && q.options ? (q.options[origIdx] ?? null) : null;
-          correct = origIdx === q.correctIndex;
-        }
-        if (correct) {
-          score += q.marks || 1;
-          sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
-        }
-      }
-      answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
-    });
+    const { score, totalMarks, sectionScores, answerSheet } =
+      scoreAttempt(qids, qmap, answers, optionOrder, assessment.sections);
 
     const passed = score >= (assessment.passingScore || 0);
     const elapsed = c.startedAt
@@ -1157,3 +1164,75 @@ exports.submitCandidate = async (req, res) => {
     res.status(500).json({ success: false, message: "Submission failed. Please try again." });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server-side timeout auto-submit (safety net).
+//
+// If a student's own time runs out but their browser never fires the submit
+// (laptop closed, network drop, tab crash), they used to stay stuck "in-progress"
+// forever — the admin sees "⏳ Time up" and no marks. This scheduler finds those
+// candidates, grades their last saved answers, and finalizes them as completed
+// (submissionReason: "timed-out"). Runs on every instance; a single atomic
+// findOneAndUpdate ensures only one instance finalizes each candidate.
+// ─────────────────────────────────────────────────────────────────────────────
+let autoSubmitTimer = null;
+const AUTO_SUBMIT_GRACE_S = 60; // give the client's own submit a minute to land first
+
+async function autoSubmitTimedOut() {
+  const cs = await Candidate.find({
+    status: { $in: ["in-progress", "started"] },
+    startedAt: { $ne: null },
+    "progress.questionOrder.0": { $exists: true },
+  }).limit(500);
+  if (!cs.length) return;
+
+  const asmtCache = {};
+  for (const c of cs) {
+    try {
+      const aId = String(c.assessmentId);
+      if (!(aId in asmtCache)) asmtCache[aId] = await Assessment.findById(aId).lean();
+      const a = asmtCache[aId];
+      if (!a) continue;
+
+      const limitS = (a.durationMinutes || 40) * 60 + AUTO_SUBMIT_GRACE_S;
+      const elapsed = Math.floor((now() - new Date(c.startedAt).getTime()) / 1000);
+      if (elapsed < limitS) continue; // time not up yet (with grace)
+
+      const answers = c.progress?.answers instanceof Map
+        ? Object.fromEntries(c.progress.answers) : (c.progress?.answers || {});
+      const optionOrder = c.progress?.optionOrder instanceof Map
+        ? Object.fromEntries(c.progress.optionOrder) : (c.progress?.optionOrder || {});
+      const qids = c.progress?.questionOrder || [];
+      const docs = await Question.find({ _id: { $in: qids } }).lean();
+      const qmap = {}; docs.forEach(q => { qmap[String(q._id)] = q; });
+
+      const { score, totalMarks, sectionScores, answerSheet } =
+        scoreAttempt(qids, qmap, answers, optionOrder, a.sections);
+      const passed = score >= (a.passingScore || 0);
+
+      // Atomic claim + finalize: the status condition means only ONE instance wins.
+      const upd = await Candidate.findOneAndUpdate(
+        { _id: c._id, status: { $in: ["in-progress", "started"] } },
+        {
+          $set: {
+            status: "completed", submissionReason: "timed-out", completedAt: new Date(),
+            score, totalMarks, passed, sectionScores, timeTakenSeconds: elapsed, answerSheet,
+          },
+          $unset: { progress: "" },
+        },
+        { new: true }
+      );
+      if (upd) console.log(`[auto-submit] timed-out candidate ${c._id} finalized (${score}/${totalMarks}).`);
+    } catch (e) {
+      console.warn(`[auto-submit] failed for ${c._id}:`, e.message);
+    }
+  }
+}
+
+function startTimeoutAutoSubmitScheduler() {
+  if (autoSubmitTimer) return;
+  autoSubmitTimer = setInterval(() => { autoSubmitTimedOut().catch(() => {}); }, 60 * 1000);
+  autoSubmitTimer.unref?.();
+  console.log("[auto-submit] timed-out auto-submit scheduler started (every 60s).");
+}
+exports.startTimeoutAutoSubmitScheduler = startTimeoutAutoSubmitScheduler;
