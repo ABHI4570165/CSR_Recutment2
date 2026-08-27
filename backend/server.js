@@ -36,17 +36,13 @@ const normalise = (u) =>
 // Collapse "www." so https://www.site.com and https://site.com are treated as the SAME origin.
 const bare = (u) => normalise(u).replace(/^(https?:\/\/)www\./, "$1");
 
-// Origins are configurable three ways, all additive — use whichever suits:
-//   FRONTEND_URLS = https://a.com,https://b.com,https://c.com   ← preferred, unlimited
-//   FRONTEND_URL  / FRONTEND_URL_2                              ← legacy, two domains max
-// The plural form exists because the app is reachable on several subdomains
-// (testportal / assessment / …) and the client-side load balancer retries the
-// SAME request against every backend — so every backend must accept every
-// front-end origin, or a failover lands on one that blocks it.
+// ONE variable holds every allowed browser origin, comma-separated:
+//   FRONTEND_URL=https://assessment.example.com,https://testportal.example.com
+// Every backend must list every front-end origin: the client-side load balancer
+// retries the SAME request against each backend, so one instance that omits an
+// origin fails the whole request as soon as failover reaches it.
 const ALLOWED_ORIGINS = [
-  ...String(process.env.FRONTEND_URLS || "").split(","),
-  process.env.FRONTEND_URL,    // e.g. https://mha-quiz.vercel.app
-  process.env.FRONTEND_URL_2,  // e.g. https://yourdomain.com  (optional second domain)
+  ...String(process.env.FRONTEND_URL || "").split(","),
   "http://localhost:5173",
   "http://localhost:4173",
 ].map((u) => normalise(u)).filter(Boolean);
@@ -212,10 +208,11 @@ app.get("/api/health/cors", (req, res) => {
     nodeEnv:        process.env.NODE_ENV || "NOT SET",
     allowedOrigins: ALLOWED_ORIGINS,
     envVarsPresent: {
-      FRONTEND_URLS:  !!process.env.FRONTEND_URLS,
-      FRONTEND_URL:   !!process.env.FRONTEND_URL,
-      FRONTEND_URL_2: !!process.env.FRONTEND_URL_2,
+      FRONTEND_URL: !!process.env.FRONTEND_URL,
     },
+    // Count only, so a mis-split value (1 where 2 were expected) is obvious
+    // without printing anything beyond the origins already listed above.
+    originCount: ALLOWED_ORIGINS.length,
     // How THIS request's own origin was judged — the actual decision, not a guess.
     yourOrigin: origin,
     yourOriginAllowed: origin
@@ -233,8 +230,7 @@ app.get("/api/debug", (_req, res) => {
     jwtSet:         !!process.env.JWT_SECRET,
     adminJwtSet:    !!process.env.ADMIN_JWT_SECRET,
     adminUsernameSet: !!process.env.ADMIN_USERNAME,
-    frontendUrl:    process.env.FRONTEND_URL  || "NOT SET",
-    frontendUrl2:   process.env.FRONTEND_URL_2 || "NOT SET",
+    frontendUrl:    process.env.FRONTEND_URL  || "NOT SET",  // comma-separated list
     redisSet:       !!process.env.REDIS_URL,
     allowedOrigins: ALLOWED_ORIGINS,
   });
