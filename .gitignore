@@ -11,6 +11,23 @@ backend/client/
 *.zip
 mha-frontend/
 mha-fullstack/
+archive/
+
+# Screen recordings / demo videos — large binaries, not source
+reference/
+
+# Candidate data, generated reports and exam papers. NEVER commit these:
+# the link sheets carry live assessment tokens (the token IS the credential),
+# the reports carry candidate names, and papers/ holds the answer keys.
+assets/
+# Migration dry-run output — candidate names, emails, phone numbers and scores.
+# The scripts themselves ARE source and stay tracked.
+backend/scripts/migrations/out/
+
+# Source questionnaires kept at the repo root (they contain answer keys).
+# Seeded into the DB by backend/scripts/seed*.js — move them under assets/ to file them away.
+/*.pdf
+/*.docx
 
 # Load-test generated results (scripts + REPORT.md are kept)
 loadtest/*-results.json
