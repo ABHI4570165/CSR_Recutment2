@@ -201,6 +201,10 @@ exports.getWorkflow = async (req, res) => {
       const wf = byTrigger[t.value];
       return {
         ...t,
+        // The row id, so the UI can DELETE it for a true reset. Without this the
+        // only way back to the built-in email was to write an "off" row, which
+        // silences the event instead of restoring the default.
+        id:         wf ? String(wf._id) : null,
         configured: !!wf,
         enabled:    wf ? wf.enabled : false,
         templateId: wf?.templateId ? String(wf.templateId) : null,
@@ -245,6 +249,9 @@ exports.setWorkflow = async (req, res) => {
       templateId = t._id;
     }
 
+    // templateId null + enabled false is a legitimate configuration: "this event
+    // sends nothing". It is what stops the built-in email without forcing the
+    // admin to invent a throwaway template just to disable it.
     const wf = await EmailWorkflow.findOneAndUpdate(
       { roundId: round._id, trigger },
       { $set: {

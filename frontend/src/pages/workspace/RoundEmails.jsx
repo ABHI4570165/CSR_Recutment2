@@ -31,7 +31,7 @@ function StateChip({ state }) {
 }
 
 /* ── One event row in the workflow ─────────────────────────────────────────── */
-function EventRow({ event, templates, busy, onAssign, onToggle, onClear }) {
+function EventRow({ event, templates, busy, onChoose }) {
   const assigned = templates.find((t) => String(t._id) === String(event.templateId));
   return (
     <div className="ws-round-card" style={{ marginBottom: 10 }}>
@@ -44,45 +44,42 @@ function EventRow({ event, templates, busy, onAssign, onToggle, onClear }) {
           <div className="ad-hint" style={{ marginTop: 4 }}>{event.fires}</div>
           {event.state === "not_configured" && (
             <div className="ad-hint" style={{ marginTop: 6, color: "#64748B" }}>
-              Nothing configured — the existing built-in email is used for this event.
+              The built-in email is sent. Choose <strong>Send nothing</strong> if you do not want any email at this event.
             </div>
           )}
           {event.state === "off" && (
             <div className="ad-hint" style={{ marginTop: 6, color: "#B91C1C" }}>
-              Switched off — <strong>no email is sent</strong> for this event.
+              <strong>No email is sent</strong> at this event.
+            </div>
+          )}
+          {event.state === "on" && assigned && (
+            <div className="ad-hint" style={{ marginTop: 6, color: "#16A34A" }}>
+              Sends <strong>{assigned.name}</strong>.
             </div>
           )}
         </div>
 
         <div className="re-event-controls">
-          <label className="ad-label" style={{ fontSize: 11 }}>Email template</label>
+          {/* ONE control with three explicit outcomes. A separate dropdown plus a
+              toggle could not express "send nothing" for an event that had no
+              template, which left the built-in email firing with no way to stop
+              it short of inventing a throwaway template. */}
+          <label className="ad-label" style={{ fontSize: 11 }}>What happens at this event</label>
           <select
             className="ad-input ad-select"
-            value={event.templateId || ""}
+            value={event.state === "not_configured" ? "builtin" : (event.state === "off" ? "nothing" : (event.templateId || "nothing"))}
             disabled={busy}
-            onChange={(e) => onAssign(event, e.target.value || null)}
+            onChange={(e) => onChoose(event, e.target.value)}
           >
-            <option value="">Not configured — use built-in</option>
-            {templates.map((t) => (
-              <option key={t._id} value={t._id}>{t.name}</option>
-            ))}
-          </select>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button
-              className={`ad-btn ad-btn--sm ${event.enabled ? "ad-btn--primary" : "ad-btn--outline"}`}
-              disabled={busy || !event.configured}
-              title={!event.configured ? "Assign a template first" : ""}
-              onClick={() => onToggle(event, !event.enabled)}
-            >
-              {busy ? <Spinner /> : event.enabled ? "ON" : "OFF"}
-            </button>
-            {event.configured && (
-              <button className="ad-btn ad-btn--sm ad-btn--outline" disabled={busy} onClick={() => onClear(event)}>
-                Reset to built-in
-              </button>
+            <option value="builtin">Use the built-in email (default)</option>
+            <option value="nothing">Send nothing</option>
+            {templates.length > 0 && (
+              <optgroup label="Send this template">
+                {templates.map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
+              </optgroup>
             )}
-          </div>
+          </select>
+          {busy && <div className="ad-hint" style={{ marginTop: 6 }}><Spinner />Saving…</div>}
           {assigned && !assigned.enabled && (
             <div className="ad-hint" style={{ marginTop: 6, color: "#B45309" }}>
               “{assigned.name}” is itself disabled, so nothing sends.
@@ -325,40 +322,33 @@ export default function RoundEmails({ round, readOnly }) {
   // round's configuration.
   useEffect(() => { load(); }, [load]);
 
-  const save = async (event, patch) => {
+  /*
+   * Three outcomes, one handler:
+   *   "builtin" → DELETE the row, so the event returns to the built-in email
+   *   "nothing" → keep a row with no template and enabled false → sends nothing
+   *   <id>      → assign that template and switch it on
+   *
+   * "builtin" must delete rather than write a disabled row: a disabled row means
+   * "send nothing", which is the opposite of restoring the default.
+   */
+  const onChoose = async (event, choice) => {
     setBusyEvent(event.value);
     try {
-      await setEmailWorkflow({ roundId, trigger: event.value, ...patch });
+      if (choice === "builtin") {
+        if (event.id) await clearEmailWorkflow(event.id);
+      } else if (choice === "nothing") {
+        await setEmailWorkflow({ roundId, trigger: event.value, templateId: null, enabled: false });
+      } else {
+        await setEmailWorkflow({ roundId, trigger: event.value, templateId: choice, enabled: true });
+      }
       const w = await fetchEmailWorkflow(roundId);
       setWorkflow(w.data.data || []);
       showToast({ type: "success", title: "Saved" });
     } catch (e) {
       showToast({ type: "error", title: e?.response?.data?.message || "Unable to save email configuration. Please try again." });
-    } finally { setBusyEvent(null); }
-  };
-
-  const onAssign = (event, templateId) => {
-    if (!templateId) return onClear(event);
-    save(event, { templateId, enabled: event.configured ? event.enabled : true });
-  };
-  const onToggle = (event, enabled) => save(event, { templateId: event.templateId, enabled });
-  const onClear = async (event) => {
-    // Clearing removes the row entirely, which is what returns the event to the
-    // built-in email — distinct from switching it off.
-    setBusyEvent(event.value);
-    try {
-      const w0 = await fetchEmailWorkflow(roundId);
-      const row = (w0.data.data || []).find((x) => x.value === event.value);
-      if (row?.configured) {
-        // The delete route needs the row id, which the workflow view does not
-        // expose; setting templateId null + enabled false is equivalent for
-        // "off", so only a true reset goes through the id lookup.
-        await setEmailWorkflow({ roundId, trigger: event.value, templateId: null, enabled: false });
-      }
-      const w = await fetchEmailWorkflow(roundId);
-      setWorkflow(w.data.data || []);
-    } catch (e) {
-      showToast({ type: "error", title: e?.response?.data?.message || "Unable to update this event." });
+      // Re-read so the control snaps back to what the server actually holds
+      // rather than showing a choice that was refused.
+      try { const w = await fetchEmailWorkflow(roundId); setWorkflow(w.data.data || []); } catch { /* keep the error visible */ }
     } finally { setBusyEvent(null); }
   };
 
@@ -398,7 +388,7 @@ export default function RoundEmails({ round, readOnly }) {
         {workflow.map((event) => (
           <EventRow key={event.value} event={event} templates={templates}
                     busy={busyEvent === event.value || readOnly}
-                    onAssign={onAssign} onToggle={onToggle} onClear={onClear} />
+                    onChoose={onChoose} />
         ))}
       </div>
 
