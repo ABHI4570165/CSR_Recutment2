@@ -12,6 +12,7 @@
  * resolve() reports "off" separately from "no template".
  */
 const EmailTemplate = require("../models/EmailTemplate");
+const EmailWorkflow = require("../models/EmailWorkflow");
 
 // Values a template may reference. Anything not listed renders as an empty
 // string rather than leaving a raw {{token}} visible to the candidate.
@@ -69,10 +70,18 @@ function htmlToText(html) {
  */
 async function resolve(roundId, trigger) {
   if (!roundId) return { status: "none" };
-  const all = await EmailTemplate.find({ roundId, trigger }).sort({ order: 1, createdAt: 1 }).lean();
-  if (!all.length) return { status: "none" };
-  const on = all.find((t) => t.enabled);
-  return on ? { status: "send", template: on } : { status: "off" };
+  const wf = await EmailWorkflow.findOne({ roundId, trigger }).lean();
+  if (!wf) return { status: "none" };              // never configured → built-in
+  if (!wf.enabled || !wf.templateId) return { status: "off" };  // switched off → send nothing
+  const template = await EmailTemplate.findById(wf.templateId).lean();
+  // A template deleted out from under a live assignment must not silently
+  // resurrect the built-in email: the admin configured this event on purpose.
+  if (!template) {
+    console.warn(`[email] ${trigger} on round ${roundId} points at a deleted template — nothing sent`);
+    return { status: "off" };
+  }
+  if (!template.enabled) return { status: "off" };
+  return { status: "send", template };
 }
 
 // Build the {{...}} values from the records the send path already has.

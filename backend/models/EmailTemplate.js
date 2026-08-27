@@ -33,7 +33,11 @@ const emailTemplateSchema = new mongoose.Schema({
   roundId:     { type: mongoose.Schema.Types.ObjectId, ref: "Round",     required: true, index: true },
 
   name:    { type: String, required: true, trim: true },   // the admin's label for this email
-  trigger: { type: String, enum: TRIGGERS, required: true, index: true },
+  // What this email is FOR. A hint only — the actual wiring lives in
+  // EmailWorkflow, so one template can serve several events and a template can
+  // exist unassigned while it is being written. Kept for display and for the
+  // {{link}} validation, which must know whether this is a link email.
+  trigger: { type: String, enum: [...TRIGGERS, null], default: null, index: true },
 
   // Off means this email simply does not go out — which is how "only one email
   // should be sent" is expressed: enable the one, disable the rest.
