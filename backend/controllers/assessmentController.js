@@ -111,6 +111,8 @@ exports.createAssessment = async (req, res) => {
 
       ...(deadline ? { deadline: new Date(deadline) } : {}),
       // Scheduling window
+      // Captured from the admin's browser so the times render back exactly as typed.
+      ...(b.timezone ? { timezone: String(b.timezone).trim() } : {}),
       ...(b.assessmentDate ? { assessmentDate: toDate(b.assessmentDate) } : {}),
       ...(b.startAt ? { startAt: toDate(b.startAt) } : {}),
       ...(b.endAt ? { endAt: toDate(b.endAt) } : {}),
@@ -201,7 +203,7 @@ exports.updateAssessment = async (req, res) => {
     const allowed = ["name", "description", "durationMinutes", "passingScore",
       "sections", "randomizeQuestions", "randomizeOptions", "deadline", "isActive", ...SCHED_FIELDS,
       // V3 editable fields (Phase 9) — note: driveType & testCode are NOT editable after creation
-      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round", "round2Sets", "walkInFields"];
+      "status", "college", "colleges", "cutoff", "maxCandidates", "expectedCandidates", "security", "securityConfig", "round", "round2Sets", "walkInFields", "timezone"];
     const update = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
     ["deadline", "assessmentDate", "startAt", "endAt", "linkSendAt"].forEach(k => { if (update[k]) update[k] = new Date(update[k]); });

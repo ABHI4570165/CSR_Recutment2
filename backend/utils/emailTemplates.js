@@ -85,15 +85,20 @@ async function resolve(roundId, trigger) {
 }
 
 // Build the {{...}} values from the records the send path already has.
-// Times are stored in UTC. Formatting them without an explicit zone uses the
-// SERVER's zone, which is UTC on Render — so a 10:00 am start rendered as
-// "4:30 am" and a date stored at 18:30 UTC rendered as the PREVIOUS DAY. The
-// built-in emails always pinned this zone; the template renderer did not.
-const TZ = process.env.DISPLAY_TIMEZONE || "Asia/Kolkata";
+// startAt/endAt are UTC instants; rendering one as text needs a zone, and the
+// right zone is THE DRIVE'S OWN — the zone the admin was in when they typed
+// "10:00 am". Falling back to the server's zone (UTC on Render) told candidates
+// 4:30 am, and for a late-evening date the previous day entirely.
+const FALLBACK_TZ = process.env.DISPLAY_TIMEZONE || "Asia/Kolkata";
 
 function varsFor({ candidate = {}, assessment = {}, round = {}, link = "", brand = "" } = {}) {
-  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: TZ }) : "");
-  const fmtTime = (d) => (d ? new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }) : "");
+  // Drives created before the zone was captured fall back, which is what they
+  // were always rendered as anyway.
+  let tz = assessment.timezone || FALLBACK_TZ;
+  try { new Date().toLocaleString("en-IN", { timeZone: tz }); }
+  catch { tz = FALLBACK_TZ; }   // a bad stored value must not break every email
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: tz }) : "");
+  const fmtTime = (d) => (d ? new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: tz }) : "");
   return {
     name:      candidate.name || "Candidate",
     email:     candidate.email || "",

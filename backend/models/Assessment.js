@@ -56,6 +56,12 @@ const assessmentSchema = new mongoose.Schema({
   isActive:           { type: Boolean, default: true },
 
   // ── Scheduling window (additive — old drives simply leave these unset) ──────
+  // The IANA zone the times below were ENTERED in, captured from the admin's
+  // browser when the drive is created. startAt/endAt are UTC instants, which on
+  // their own cannot say "10:00 am" — without this the server formats them in
+  // ITS zone (UTC on Render) and the candidate is told the wrong time, and for a
+  // late-evening date the wrong day. Older drives leave it unset and fall back.
+  timezone:       { type: String, default: undefined },
   assessmentDate: { type: Date },   // calendar date of the drive
   startAt:        { type: Date },   // assessment opens (candidates cannot start before)
   endAt:          { type: Date },   // assessment closes (candidates cannot start after)

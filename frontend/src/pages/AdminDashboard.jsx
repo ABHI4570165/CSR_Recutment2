@@ -970,6 +970,10 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
         durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
         ...(useSets ? { round2Sets: paper.sets } : {}),
         ...(useSets && walkInFields.length ? { walkInFields } : {}),
+        // The times above are read from date/time inputs, which are in THIS
+        // browser's zone. Sending that zone with them lets the server render
+        // "10:00 am" back as 10:00 am instead of in its own zone.
+        timezone: (()=>{ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; }catch{ return undefined; } })(),
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
@@ -1193,6 +1197,9 @@ function EditDriveModal({ drive, onClose, onSaved }) {
         ...(drive.driveType==="WALK_IN" ? { maxCandidates: maxCandidates===""?null:Number(maxCandidates) } : {}),
         colleges: collegesText.split("\n").map(s=>s.trim()).filter(Boolean),
         ...sched,
+        // Editing re-reads the times from this browser's inputs, so the zone must
+        // travel with them or a drive edited elsewhere keeps a stale one.
+        ...(Object.keys(sched).length ? { timezone: (()=>{ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; }catch{ return undefined; } })() } : {}),
         security, securityConfig:secConfig,
       });
       onSaved();
