@@ -218,7 +218,9 @@ async function main() {
   console.log(`Removed ${del.deletedCount} old set-${SET} questions; inserted ${inserted.length}${wsId ? ` into workspace ${wsId}` : " (unscoped)"}.`);
 
   const agg = await Question.aggregate([
-    { $match: { round: 2, set: SET } },
+    // Scoped like the write above. Matching on round+set alone counted EVERY
+    // workspace's copy, so seeding a second workspace reported doubled totals.
+    { $match: scope },
     { $group: { _id: { section: "$section", type: "$type" }, n: { $sum: 1 } } },
     { $sort: { "_id.section": 1 } },
   ]);

@@ -1,0 +1,26 @@
+# SPA fallback — the app uses client-side routing (React Router), so every
+# path that isn't a real file/folder must be served index.html. Without this,
+# deep links like /mh-ctrl-9x7k2q4z (admin) return Hostinger's 404 page.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Serve existing files and directories as-is (assets, images, etc.)
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else falls through to the SPA entry point
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Long-cache the fingerprinted asset bundles; never cache index.html so new
+# deploys are picked up immediately.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css|woff2?|png|jpg|jpeg|gif|svg|webp)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+  </FilesMatch>
+</IfModule>
