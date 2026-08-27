@@ -243,3 +243,31 @@
   .re-tpl-actions { width: 100%; }
   .re-tpl-actions .ad-btn { flex: 1; }
 }
+
+/* ── Manual send ────────────────────────────────────────────────────────────
+   Selection bar sits with the search controls; the dialog is two-column on
+   desktop and stacks below 980px so the preview stays usable on a phone. */
+.ms-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+  padding: 6px 12px; font-size: 13px; color: #3730a3;
+}
+.ms-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.ms-form, .ms-preview { min-width: 0; }
+.ms-recipients {
+  border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 8px 10px;
+  max-height: 190px; overflow-y: auto; background: var(--surface-2, #f8fafc);
+}
+.ms-recipient { display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,.05); }
+.ms-recipient:last-child { border-bottom: 0; }
+.ms-subject {
+  border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 10px 12px;
+  background: var(--surface-2, #f8fafc); font-weight: 600; word-break: break-word;
+}
+.ms-fail { border: 1px solid #fecaca; background: #fef2f2; border-radius: 8px; padding: 10px 12px; }
+
+@media (max-width: 980px) { .ms-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .ms-bar { width: 100%; }
+  .ms-bar .ad-btn { flex: 1; }
+}

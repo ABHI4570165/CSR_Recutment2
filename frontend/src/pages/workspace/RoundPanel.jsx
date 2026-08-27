@@ -5,6 +5,7 @@ import {
 } from "../../utils/workspaceApi";
 import { Loading, ErrorNote, Empty, Modal, Confirm, Spinner, StatusBadge, useToast, Pagination, pretty } from "./ui";
 import { cutoffLabel, CUTOFF_METHODS, usesEngine } from "./RoundBuilder";
+import ManualSendDialog from "./ManualSendDialog";
 
 /*
  * Round management: statistics, the candidate table, cutoff preview/apply and
@@ -21,6 +22,10 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
   const [pag, setPag] = useState({});
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  // Candidates picked for a manual email. Stored as whole rows, keyed by id, so
+  // the list survives pagination and the dialog can show who it is mailing.
+  const [picked, setPicked] = useState(() => new Map());
+  const [sending, setSending] = useState(false);
   const [qFilter, setQFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -139,6 +144,13 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
       <div className="ad-toolbar">
         <input className="ad-search" placeholder="Search name, email, college…"
           value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
+        {!readOnly && picked.size > 0 && (
+          <div className="ms-bar">
+            <span><strong>{picked.size}</strong> candidate{picked.size === 1 ? "" : "s"} selected</span>
+            <button className="ad-btn ad-btn--sm ad-btn--primary" onClick={() => setSending(true)}>✉️ Send email</button>
+            <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={() => setPicked(new Map())}>Clear</button>
+          </div>
+        )}
         <select className="ad-select" value={qFilter} onChange={e => { setQFilter(e.target.value); setPage(1); }}>
           <option value="">All qualifications</option>
           <option value="QUALIFIED">Qualified</option>
@@ -157,11 +169,37 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
           ) : (
             <table className="ad-table">
               <thead>
-                <tr><th>#</th><th>Student</th><th>Phone</th><th>College</th><th>Attended</th><th>Score</th><th>%</th><th>Result</th><th>Qualification</th><th>Actions</th></tr>
+                <tr>
+                  {!readOnly && (
+                    <th style={{ width: 34 }}>
+                      <input type="checkbox" aria-label="Select all on this page"
+                        checked={rows.length > 0 && rows.every(r => picked.has(r._id))}
+                        onChange={e => setPicked(m => {
+                          const n = new Map(m);
+                          // Only the visible page is affected, so a tick here never
+                          // silently selects candidates the admin has not seen.
+                          rows.forEach(r => e.target.checked ? n.set(r._id, r) : n.delete(r._id));
+                          return n;
+                        })} />
+                    </th>
+                  )}
+                  <th>#</th><th>Student</th><th>Phone</th><th>College</th><th>Attended</th><th>Score</th><th>%</th><th>Result</th><th>Qualification</th><th>Actions</th>
+                </tr>
               </thead>
               <tbody>
                 {rows.map((c, i) => (
                   <tr key={c._id}>
+                    {!readOnly && (
+                      <td>
+                        <input type="checkbox" aria-label={`Select ${c.name || "candidate"}`}
+                          checked={picked.has(c._id)}
+                          onChange={e => setPicked(m => {
+                            const n = new Map(m);
+                            e.target.checked ? n.set(c._id, c) : n.delete(c._id);
+                            return n;
+                          })} />
+                      </td>
+                    )}
                     <td className="ad-td-num">{(page - 1) * 20 + i + 1}</td>
                     <td>
                       <div className="ad-td-name"><div className="ad-avatar">{(c.name || "?").charAt(0)}</div>
@@ -223,6 +261,15 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
         <OverrideModal candidate={overrideTarget} onClose={() => setOverrideTarget(null)}
           onSaved={() => { setOverrideTarget(null); showToast({ title: "Qualification overridden" }); refresh(); }}
           onError={(m) => showToast({ type: "error", title: "Could not override", lines: [m] })} />
+      )}
+
+      {/* Manual email to the picked candidates. Only ids are sent; the backend
+          re-checks every one against the workspace before mailing anybody. */}
+      {sending && (
+        <ManualSendDialog round={round} candidates={[...picked.values()]}
+          onClose={() => setSending(false)}
+          onSent={() => { setSending(false); setPicked(new Map()); }}
+          toast={showToast} />
       )}
     </div>
   );
