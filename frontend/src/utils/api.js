@@ -207,6 +207,9 @@ export function warmAllBackends() {
 
 // ── Question APIs ─────────────────────────────────────────────────────────────
 export const fetchQuestions = (p)    => adminApi.get("/questions",        { params: p });
+// Round-2 paper catalogue, derived from the questions in the DB. Seeding a new
+// set is enough for it to appear in the drive-creation dropdown.
+export const fetchQuestionCatalog = (p) => adminApi.get("/questions/catalog", { params: p });
 export const addQuestion    = (d)    => adminApi.post("/questions", d);
 export const updateQuestion = (id,d) => adminApi.put(`/questions/${id}`, d);
 export const deleteQuestion = (id)   => adminApi.delete(`/questions/${id}`);

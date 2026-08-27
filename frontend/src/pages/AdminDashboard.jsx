@@ -8,7 +8,7 @@ import {
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
   fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers, terminateCandidate, refreshTestCode,
   getSystemStatus, setActiveMode, sendHeartbeat, warmAllBackends, BACKEND_COUNT,
-  fetchRoundSummary, fetchCandidateJourney, moveToTechnical
+  fetchRoundSummary, fetchCandidateJourney, moveToTechnical, fetchQuestionCatalog
 } from "../utils/api";
 import "./AdminDashboard.css";
 // Multi-workspace recruitment module (additive — the legacy screens below are untouched).
@@ -814,10 +814,10 @@ const TRAINER_SECTIONS_FULL = [
   { name:"tr_sec_d", displayName:"Section D — Output Prediction (Python / Pandas / SQL)", questionCount:10, color:"#059669" },
   { name:"tr_sec_e", displayName:"Section E — Scenario-Based Questions",                  questionCount:10, color:"#D97706" },
 ];
-// Round-2 versions the admin picks from when creating a Round 2 drive.
-// Version A = Sets A & B (aptitude); Version B = Sets C & D (advanced) — the two
-// sets in a version alternate between candidates. The Trainer versions use the
-// single set T, so every candidate sits the same paper.
+// FALLBACK ONLY. The real list comes from GET /questions/catalog, which derives
+// it from the questions actually in the DB — so seeding a new set is enough to
+// make it selectable, with no frontend change. These hard-coded papers are used
+// only if that request fails (offline / older backend).
 const ROUND2_PAPERS = {
   A:  { label:ROUND2_VERSIONS.A.label,  sets:["A","B"], sections:ROUND2_SECTIONS },
   B:  { label:ROUND2_VERSIONS.B.label,  sets:["C","D"], sections:ROUND2_SECTIONS_CD },
@@ -850,13 +850,35 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
   const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG});
   const [collegesText,setCollegesText]=useState("");
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
+  // Papers come from the backend (derived from the seeded questions). The
+  // hard-coded ROUND2_PAPERS are only a fallback if that call fails.
+  const [papers,setPapers]=useState(null);
+  const [papersErr,setPapersErr]=useState("");
+
+  useEffect(()=>{
+    let alive=true;
+    fetchQuestionCatalog({round:2})
+      .then(r=>{
+        if(!alive) return;
+        const list=r?.data?.data?.papers||[];
+        if(!list.length){ setPapersErr("No Round-2 question sets found in the database for this workspace."); return; }
+        const map={}; list.forEach(p=>{ map[p.key]=p; });
+        setPapers(map);
+        setRound2Paper(prev=>map[prev]?prev:list[0].key);   // keep the choice if it still exists
+      })
+      .catch(()=>{ if(alive) setPapersErr("Could not load question sets from the server — showing the built-in list."); });
+    return ()=>{ alive=false; };
+  },[]);
+
+  const paperMap = papers || ROUND2_PAPERS;
 
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
     if(driveType==="WALK_IN" && round!==2 && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
     // Round 2 uses the sections of the chosen set-paper; Round 1 uses the chosen pool sections.
-    const paper = ROUND2_PAPERS[round2Paper] || ROUND2_PAPERS.B;
+    const paper = paperMap[round2Paper] || Object.values(paperMap)[0];
+    if(round===2 && !paper){ setErr("No Round-2 question set is available. Seed questions first."); return; }
     const chosen = round===2
       ? paper.sections
       : secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
@@ -969,7 +991,7 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
               <div className="ad-field">
                 <label className="ad-label">Question Version for this drive</label>
                 <select className="ad-input ad-select" value={round2Paper} onChange={e=>setRound2Paper(e.target.value)}>
-                  {Object.entries(ROUND2_PAPERS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  {Object.entries(paperMap).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
                 <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D — each candidate gets ONE set, alternating between students. The two <strong>Trainer (DS/DA)</strong> versions both use Set T, so every candidate sits the same paper.</span>
               </div>
@@ -988,15 +1010,19 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
                 </div>
               )}
               <div className="ad-note ad-note--info" style={{marginTop:10}}>
-                <strong>Selected: {ROUND2_PAPERS[round2Paper]?.label}.</strong> Questions are jumbled within each section; MCQ options shuffled.
-                SQL questions show their reference tables. Edit these in the <strong>Questions</strong> tab (Round 2 · Version {round2Paper} → Set {ROUND2_PAPERS[round2Paper]?.sets.join(" / ")}).
+                <strong>Selected: {paperMap[round2Paper]?.label}.</strong> Questions are jumbled within each section; MCQ options shuffled.
+                SQL questions show their reference tables. Edit these in the <strong>Questions</strong> tab (Round 2 · Set {paperMap[round2Paper]?.sets.join(" / ")}).
               </div>
-              {round2Paper==="T2" && (
+              {papersErr && <div className="ad-note ad-note--purple" style={{marginTop:10}}>{papersErr}</div>}
+              {(paperMap[round2Paper]?.manualCount>0) && (
                 <div className="ad-note ad-note--purple" style={{marginTop:10}}>
-                  ⚠️ Sections <strong>C</strong> and <strong>E</strong> are open-ended and most of <strong>D</strong> is descriptive, so they cannot be auto-scored — the engine marks them 0.
-                  Treat the auto score as the MCQ score (Sections A &amp; B, 24 marks) and mark the written answers by hand from
+                  ⚠️ <strong>{paperMap[round2Paper].manualCount} of {paperMap[round2Paper].questionCount}</strong> questions in this paper are open-ended,
+                  so exact-match scoring cannot grade them — the engine marks them 0. The auto score is effectively the
+                  remaining <strong>{paperMap[round2Paper].marks - paperMap[round2Paper].manualCount} marks</strong>; mark the written answers by hand from
                   <strong> Candidates → View Responses</strong>, where each typed answer sits beside its model answer / rubric.
-                  Pick <strong>Trainer (DS/DA) — MCQ Screening</strong> instead if you want a fully auto-scored result.
+                  {paperMap[round2Paper].sections.some(x=>x.longAnswer>0) && (
+                    <> Open-ended sections: <strong>{paperMap[round2Paper].sections.filter(x=>x.longAnswer>0).map(x=>x.displayName.split("—")[0].trim()).join(", ")}</strong>.</>
+                  )}
                 </div>
               )}
             </>) : (<>
