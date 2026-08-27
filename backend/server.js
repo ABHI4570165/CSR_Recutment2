@@ -24,12 +24,20 @@ const normalise = (u) => (u || "").replace(/\/+$/, "").toLowerCase().trim();
 // Collapse "www." so https://www.site.com and https://site.com are treated as the SAME origin.
 const bare = (u) => normalise(u).replace(/^(https?:\/\/)www\./, "$1");
 
+// Origins are configurable three ways, all additive — use whichever suits:
+//   FRONTEND_URLS = https://a.com,https://b.com,https://c.com   ← preferred, unlimited
+//   FRONTEND_URL  / FRONTEND_URL_2                              ← legacy, two domains max
+// The plural form exists because the app is reachable on several subdomains
+// (testportal / assessment / …) and the client-side load balancer retries the
+// SAME request against every backend — so every backend must accept every
+// front-end origin, or a failover lands on one that blocks it.
 const ALLOWED_ORIGINS = [
+  ...String(process.env.FRONTEND_URLS || "").split(","),
   process.env.FRONTEND_URL,    // e.g. https://mha-quiz.vercel.app
   process.env.FRONTEND_URL_2,  // e.g. https://yourdomain.com  (optional second domain)
   "http://localhost:5173",
   "http://localhost:4173",
-].filter(Boolean).map(normalise);
+].map((u) => normalise(u)).filter(Boolean);
 
 const ALLOWED_BARE = ALLOWED_ORIGINS.map(bare);
 console.log("[CORS] Allowed origins:", ALLOWED_ORIGINS);
@@ -54,8 +62,11 @@ const corsOptions = {
 
     if (allowed) return cb(null, true);
 
+    // cb(null, false) omits the CORS headers so the browser still blocks the
+    // request — but the response stays a clean 204/4xx instead of a 500 thrown
+    // through Express, which made this look like a server crash in the logs.
     console.warn(`[CORS] BLOCKED: "${origin}" not in allowed list: ${ALLOWED_ORIGINS.join(", ")}`);
-    return cb(new Error(`CORS: origin not allowed — ${origin}`));
+    return cb(null, false);
   },
   credentials:    true,
   methods:        ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
