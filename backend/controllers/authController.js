@@ -4,9 +4,13 @@ const User = require("../models/User");
 // ── Student Registration ──────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    // DEBUG — remove after confirming fix in production
-    console.log("[register] Content-Type:", req.headers["content-type"]);
-    console.log("[register] req.body:", JSON.stringify(req.body));
+    // Log only that a request arrived and which fields were PRESENT — never the
+    // values. Request bodies carry personal data (and, on other endpoints,
+    // credentials), so they must never reach the server log.
+    console.log("[register] Registration attempt", {
+      contentType: req.headers["content-type"],
+      fields: Object.keys(req.body || {}),
+    });
 
     const { name, email, college, rollNo, phone } = req.body || {};
 
@@ -71,7 +75,8 @@ exports.register = async (req, res) => {
     user.quizToken = token;
     await user.save();
 
-    console.log("[register] Success — user:", user.email);
+    // Identify by id, not email — the log should not become a list of addresses.
+    console.log("[register] Success — userId:", String(user._id));
 
     // Return token at BOTH response.data.token AND response.data.data.token
     // so any frontend access pattern works
@@ -111,7 +116,12 @@ exports.register = async (req, res) => {
 // ── Admin Login ───────────────────────────────────────────────────────────────
 exports.adminLogin = async (req, res) => {
   try {
-    console.log("[adminLogin] req.body:", JSON.stringify(req.body));
+    // NEVER log the request body here — it contains the admin password.
+    // Presence only, so a failed login is still diagnosable from the log.
+    console.log("[adminLogin] Login attempt", {
+      username: req.body?.username ? "[provided]" : "[missing]",
+      password: req.body?.password ? "[provided]" : "[missing]",
+    });
     const { username, password } = req.body || {};
 
     if (!username || !password) {

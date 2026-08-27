@@ -59,7 +59,10 @@ const corsOptions = {
   },
   credentials:    true,
   methods:        ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  // X-Workspace-Id carries the active workspace on every admin request. Without
+  // it here the browser's preflight rejects the request before it is ever sent
+  // (server-side tests never see this — only a real browser performs preflight).
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Workspace-Id"],
   exposedHeaders: ["Content-Length"],
 };
 
@@ -124,6 +127,15 @@ app.use("/api/assessments", require("./routes/assessments")); // admin: drives +
 app.use("/api/candidate",   require("./routes/candidate"));   // public: token-based flow
 app.use("/api/walkin",      require("./routes/walkin"));      // public: walk-in test-code registration
 app.use("/api/system",      require("./routes/system"));      // admin: active-mode + heartbeat
+// ── Multi-workspace recruitment architecture (additive — legacy routes above
+// keep serving the existing drives untouched) ─────────────────────────────────
+app.use("/api/workspaces",     require("./routes/workspaces"));    // companies + dynamic registration fields
+app.use("/api/drives",         require("./routes/drives"));        // drives + dynamic rounds
+app.use("/api/rounds",         require("./routes/rounds"));        // assign · cutoff · advance · results
+app.use("/api/applications",   require("./routes/applications"));  // the PEOPLE view (deduplicated)
+app.use("/api/participations", require("./routes/applications").participations);
+app.use("/api/reports",        require("./routes/reports"));       // workspace-scoped AI reports
+app.use("/api/public",         require("./routes/publicPages"));   // published final-selection page
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) =>

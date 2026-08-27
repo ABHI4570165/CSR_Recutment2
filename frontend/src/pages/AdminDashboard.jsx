@@ -7,9 +7,14 @@ import {
   fetchAssessments, fetchOverview, createAssessment, updateAssessment, deleteAssessment,
   uploadCandidates, scheduleInvites, fetchCandidates, fetchCandidateStats,
   fetchDriveColleges, setCandidateStatus, deleteCandidate, downloadResume, downloadResumeFile, testEmail, fetchCandidateAnswers, terminateCandidate, refreshTestCode,
-  getSystemStatus, setActiveMode, sendHeartbeat
+  getSystemStatus, setActiveMode, sendHeartbeat, warmAllBackends, BACKEND_COUNT,
+  fetchRoundSummary, fetchCandidateJourney, moveToTechnical
 } from "../utils/api";
 import "./AdminDashboard.css";
+// Multi-workspace recruitment module (additive — the legacy screens below are untouched).
+import WorkspaceModule, { WorkspaceProvider, WorkspaceSwitcherSlot, useWorkspace } from "./workspace/WorkspaceModule";
+import RoundsPage from "./workspace/RoundsPage";
+import RoundPanel from "./workspace/RoundPanel";
 
 // Read-only viewer? (role stored at login). Mutating UI is hidden when true;
 // the backend ALSO rejects mutations from viewer tokens (defence in depth).
@@ -59,13 +64,22 @@ const TECH_SECTION_OPTS = [
   { name:"t_sec_b", displayName:"[R2] Section B — Python / Output" },
   { name:"t_sec_c", displayName:"[R2] Section C — Advanced / SQL" },
   { name:"t_sec_d", displayName:"[R2] Section D — DSA" },
+  // Trainer bank (set T) — its own section keys so it never mixes with sets A–D.
+  { name:"tr_sec_a", displayName:"[Trainer] Section A — Data Analytics MCQs" },
+  { name:"tr_sec_b", displayName:"[Trainer] Section B — Data Science / ML MCQs" },
+  { name:"tr_sec_c", displayName:"[Trainer] Section C — Application-Level" },
+  { name:"tr_sec_d", displayName:"[Trainer] Section D — Output Prediction" },
+  { name:"tr_sec_e", displayName:"[Trainer] Section E — Scenario-Based" },
 ];
-// Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced).
+// Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced),
+// Trainer = the DS/DA trainer screening bank (single set T, so every candidate gets it).
 const ROUND2_VERSIONS = {
-  A: { label:"Version A — Aptitude · Set A & B · 30 Q · 30 marks (1 each)",              sets:["A","B"] },
-  B: { label:"Version B — Advanced Python/SQL/DSA · Set C & D · 40 Q · 40 marks (1 each)", sets:["C","D"] },
+  A:  { label:"Version A — Aptitude · Set A & B · 30 Q · 30 marks (1 each)",                        sets:["A","B"] },
+  B:  { label:"Version B — Advanced Python/SQL/DSA · Set C & D · 40 Q · 40 marks (1 each)",         sets:["C","D"] },
+  T1: { label:"Trainer (DS/DA) — MCQ Screening · Set T · 24 Q · fully auto-scored",                 sets:["T"] },
+  T2: { label:"Trainer (DS/DA) — Full Bank A–E · Set T · 54 Q · Sections C/D/E reviewed by hand",   sets:["T"] },
 };
-const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B" };
+const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B", T:"T2" };
 
 // ── Question Form (MCQ or typed-answer) ───────────────────────────────────────
 function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
@@ -74,6 +88,7 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
   const [opts,   setOpts]   = useState(initial?.options||["","","",""]);
   const [correct,setCorrect]= useState(initial?.correctIndex??0);
   const [answerText,setAnswerText]=useState(initial?.answerText||"");
+  const [longAnswer,setLongAnswer]=useState(!!initial?.longAnswer);
   const [marks,  setMarks]  = useState(initial?.marks||1);
   const [section,setSection]= useState(initial?.section||(sections[0]?.name||"aptitude"));
   const [round,  setRound]  = useState(initial?.round||1);
@@ -87,12 +102,12 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
   const save = () => {
     if(!text.trim())          { setErr("Question text is required."); return; }
     if(!section)              { setErr("Please select a section."); return; }
-    if(Number(round)===2 && !set){ setErr("Round 2 questions must belong to a Set (A/B in Version A, C/D in Version B)."); return; }
+    if(Number(round)===2 && !set){ setErr("Round 2 questions must belong to a Set (A/B in Version A, C/D in Version B, T for the Trainer bank)."); return; }
     const base={ text:text.trim(), type, marks:Number(marks)||1, section,
       round:Number(round)||1, set: Number(round)===2 ? set : null };
     if(type==="text"){
-      if(!answerText.trim()){ setErr("Enter the expected answer for this text question."); return; }
-      onSave({ ...base, answerText:answerText.trim() });
+      if(!answerText.trim()){ setErr(longAnswer?"Enter the model answer / rubric an evaluator should mark against.":"Enter the expected answer for this text question."); return; }
+      onSave({ ...base, answerText:answerText.trim(), longAnswer });
     } else {
       if(opts.some(o=>!o.trim())){ setErr("All 4 options are required."); return; }
       onSave({ ...base, options:opts.map(o=>o.trim()), correctIndex:correct });
@@ -111,7 +126,7 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
           <label className="ad-label">Type</label>
           <select className="ad-input ad-select" value={type} onChange={e=>setType(e.target.value)}>
             <option value="mcq">Multiple choice (4 options)</option>
-            <option value="text">Typed answer (exact output)</option>
+            <option value="text">Typed answer</option>
           </select>
           <label className="ad-label" style={{marginTop:6}}>Section</label>
           <select className="ad-input ad-select" value={section} onChange={e=>setSection(e.target.value)}>
@@ -137,15 +152,29 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
                 <option value="C">Set C</option>
                 <option value="D">Set D</option>
               </optgroup>
+              <optgroup label="Trainer (DS/DA)">
+                <option value="T">Set T</option>
+              </optgroup>
             </select>
           </>)}
         </div>
       </div>
       {type==="text" ? (
         <div className="ad-field" style={{marginTop:4}}>
-          <label className="ad-label">Expected Answer (exact output — case/space insensitive)</label>
-          <input className="ad-input" value={answerText} onChange={e=>{setAnswerText(e.target.value);setErr("");}}
-            placeholder="e.g. 4"/>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,marginBottom:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={longAnswer} onChange={e=>setLongAnswer(e.target.checked)}/>
+            Open-ended / essay answer — show a large text box and mark it by hand
+          </label>
+          <label className="ad-label">
+            {longAnswer ? "Model Answer / Rubric (shown to the evaluator only — never auto-scored)"
+                        : "Expected Answer (exact output — case/space insensitive)"}
+          </label>
+          {longAnswer
+            ? <textarea className="ad-input ad-textarea" rows={4} value={answerText}
+                onChange={e=>{setAnswerText(e.target.value);setErr("");}}
+                placeholder="What to look for: …"/>
+            : <input className="ad-input" value={answerText} onChange={e=>{setAnswerText(e.target.value);setErr("");}}
+                placeholder="e.g. 4"/>}
         </div>
       ) : (
         <div className="ad-qform-opts">
@@ -377,6 +406,9 @@ function LoginScreen({ mode = "admin", onLogin }) {
       }
       localStorage.setItem("adminToken", res.data.token);          // persistent (survives browser close)
       localStorage.setItem("adminRole", role);                     // "admin" | "viewer"
+      // A new session always begins at the GLOBAL OVERVIEW — drop any workspace
+      // an earlier session had open so nothing is auto-selected.
+      localStorage.removeItem("mh_workspace");
       onLogin();
     } catch(er) { setErr(er.message||"Invalid credentials"); }
     finally { setLoading(false); }
@@ -499,14 +531,14 @@ function CutoffTab() {
               onKeyDown={e=>e.key==="Enter"&&loadPreview(1)}/>
             <select className="ad-select" style={{minWidth:220}} value={assessmentId}
               onChange={e=>{setAssessmentId(e.target.value);setPreview(null);}}>
-              <option value="">All Drives</option>
+              <option value="">All Rounds</option>
               {drives.map(d=><option key={d._id} value={d._id}>{d.name}</option>)}
             </select>
             <button className="ad-btn ad-btn--primary" onClick={()=>loadPreview(1)} disabled={loading||!cutoff}>
               {loading?<><Spinner/>Loading…</>:"Preview Results"}
             </button>
           </div>
-          <span className="ad-hint">Cutoff now runs on your drive candidates. Pick a drive, or leave “All Drives” to filter everyone across drives.</span>
+          <span className="ad-hint">Cutoff runs across this workspace. Narrow it to one round’s test, or leave “All Rounds” to include everyone.</span>
           {err && <p className="ad-form-err" style={{marginTop:8}}>{err}</p>}
         </div>
       </div>
@@ -770,12 +802,27 @@ const ROUND2_SECTIONS_CD = [
   { name:"t_sec_c", displayName:"Section C — SQL Output Prediction",      questionCount:10, color:"#0891B2" },
   { name:"t_sec_d", displayName:"Section D — Data Structures & Algorithms", questionCount:10, color:"#059669" },
 ];
+// Set T — DS/DA Trainer Technical Screening bank (seeded by scripts/seedTrainerSet.js).
+// Two paper layouts over the SAME set: the MCQ-only screen, and the full A–E bank.
+const TRAINER_SECTIONS_MCQ = [
+  { name:"tr_sec_a", displayName:"Section A — Data Analytics MCQs (SQL, Statistics, BI)", questionCount:12, color:"#4F46E5" },
+  { name:"tr_sec_b", displayName:"Section B — Data Science / Machine Learning MCQs",      questionCount:12, color:"#7C3AED" },
+];
+const TRAINER_SECTIONS_FULL = [
+  ...TRAINER_SECTIONS_MCQ,
+  { name:"tr_sec_c", displayName:"Section C — Application-Level Questions",               questionCount:10, color:"#0891B2" },
+  { name:"tr_sec_d", displayName:"Section D — Output Prediction (Python / Pandas / SQL)", questionCount:10, color:"#059669" },
+  { name:"tr_sec_e", displayName:"Section E — Scenario-Based Questions",                  questionCount:10, color:"#D97706" },
+];
 // Round-2 versions the admin picks from when creating a Round 2 drive.
-// Version A = Sets A & B (aptitude); Version B = Sets C & D (advanced). The two
-// sets in a version alternate between candidates.
+// Version A = Sets A & B (aptitude); Version B = Sets C & D (advanced) — the two
+// sets in a version alternate between candidates. The Trainer versions use the
+// single set T, so every candidate sits the same paper.
 const ROUND2_PAPERS = {
-  A: { label:ROUND2_VERSIONS.A.label, sets:["A","B"], sections:ROUND2_SECTIONS },
-  B: { label:ROUND2_VERSIONS.B.label, sets:["C","D"], sections:ROUND2_SECTIONS_CD },
+  A:  { label:ROUND2_VERSIONS.A.label,  sets:["A","B"], sections:ROUND2_SECTIONS },
+  B:  { label:ROUND2_VERSIONS.B.label,  sets:["C","D"], sections:ROUND2_SECTIONS_CD },
+  T1: { label:ROUND2_VERSIONS.T1.label, sets:["T"],     sections:TRAINER_SECTIONS_MCQ },
+  T2: { label:ROUND2_VERSIONS.T2.label, sets:["T"],     sections:TRAINER_SECTIONS_FULL },
 };
 // Extra fields an admin can choose to collect at Round-2 walk-in registration
 // (beyond the always-on Name / Email / Mobile).
@@ -784,10 +831,10 @@ const WALKIN_FIELD_OPTS = [
   ["gender","Gender"], ["dob","Date of Birth"], ["aadhaar","Aadhaar"], ["location","Location"],
 ];
 
-function CreateDriveModal({ sections, onClose, onCreated }) {
+function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
-  const [round,setRound]=useState(1);
+  const [round,setRound]=useState(lockedRound ? Number(lockedRound) : 1);
   const [round2Paper,setRound2Paper]=useState("B");   // default to Version B (Sets C&D · 40 Q); A = Sets A&B · 30 Q
   const [walkInFields,setWalkInFields]=useState([]);  // extra registration fields to collect (round 2 walk-in)
   const [maxCandidates,setMaxCandidates]=useState("");
@@ -809,7 +856,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
     if(driveType==="WALK_IN" && round!==2 && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
     // Round 2 uses the sections of the chosen set-paper; Round 1 uses the chosen pool sections.
-    const paper = ROUND2_PAPERS[round2Paper] || ROUND2_PAPERS.CD;
+    const paper = ROUND2_PAPERS[round2Paper] || ROUND2_PAPERS.B;
     const chosen = round===2
       ? paper.sections
       : secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
@@ -857,10 +904,14 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
               <input className="ad-input" value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="e.g. Inference Labs Campus Drive 2026"/></div>
             <div className="ad-grid-2" style={{marginTop:12}}>
               <div className="ad-field"><label className="ad-label">Assessment Round</label>
-                <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))}>
-                  <option value={1}>Round 1 — Aptitude pool (existing questions)</option>
-                  <option value={2}>Round 2 — Technical Sets A &amp; B (auto-distributed)</option>
-                </select></div>
+                <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))} disabled={!!lockedRound}>
+                  {(rounds && rounds.length
+                    ? rounds.map(r=>({v:r.sequence,l:`Round ${r.sequence} — ${r.name}`}))
+                    : [{v:1,l:"Round 1 — Aptitude pool (existing questions)"},
+                       {v:2,l:"Round 2 — Technical Sets A & B (auto-distributed)"}]
+                  ).map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                </select>
+                {lockedRound && <div className="ad-hint">This drive belongs to the round you opened it from.</div>}</div>
               <div className="ad-field"><label className="ad-label">Drive Type</label>
                 <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
                   <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
@@ -920,7 +971,7 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
                 <select className="ad-input ad-select" value={round2Paper} onChange={e=>setRound2Paper(e.target.value)}>
                   {Object.entries(ROUND2_PAPERS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                 </select>
-                <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D. Each candidate gets ONE set, alternating between students.</span>
+                <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D — each candidate gets ONE set, alternating between students. The two <strong>Trainer (DS/DA)</strong> versions both use Set T, so every candidate sits the same paper.</span>
               </div>
               {driveType==="WALK_IN" && (
                 <div className="ad-field">
@@ -940,6 +991,14 @@ function CreateDriveModal({ sections, onClose, onCreated }) {
                 <strong>Selected: {ROUND2_PAPERS[round2Paper]?.label}.</strong> Questions are jumbled within each section; MCQ options shuffled.
                 SQL questions show their reference tables. Edit these in the <strong>Questions</strong> tab (Round 2 · Version {round2Paper} → Set {ROUND2_PAPERS[round2Paper]?.sets.join(" / ")}).
               </div>
+              {round2Paper==="T2" && (
+                <div className="ad-note ad-note--purple" style={{marginTop:10}}>
+                  ⚠️ Sections <strong>C</strong> and <strong>E</strong> are open-ended and most of <strong>D</strong> is descriptive, so they cannot be auto-scored — the engine marks them 0.
+                  Treat the auto score as the MCQ score (Sections A &amp; B, 24 marks) and mark the written answers by hand from
+                  <strong> Candidates → View Responses</strong>, where each typed answer sits beside its model answer / rubric.
+                  Pick <strong>Trainer (DS/DA) — MCQ Screening</strong> instead if you want a fully auto-scored result.
+                </div>
+              )}
             </>) : (<>
               <span className="ad-hint" style={{display:"block",marginBottom:6}}>Sections are drawn from the shared question pool. Tick the sections to include and set the question count.</span>
               <div className="ad-sec-pick-list">
@@ -1178,7 +1237,12 @@ function UploadModal({ assessment, onClose, onDone }) {
   );
 }
 
-function DrivesTab() {
+function DrivesTab({ wsRounds = null, lockedRound = null }) {
+  // wsRounds  — the OPEN WORKSPACE's rounds ({sequence,name}). When supplied the
+  //             round tabs below are generated from them instead of the two
+  //             hard-coded legacy labels, so a workspace with 5 rounds shows 5.
+  // lockedRound — when a drive is created from inside a round, it belongs to
+  //             that round and the selector is fixed.
   const [drives,setDrives]=useState([]);
   const [sections,setSections]=useState([]);
   const [sel,setSel]=useState(null);            // selected assessment
@@ -1194,7 +1258,7 @@ function DrivesTab() {
   const [resumeView,setResumeView]=useState(null); // candidate whose resume is open
   const [profileCand,setProfileCand]=useState(null); // candidate whose profile dialog is open
   const [driveFilter,setDriveFilter]=useState("active"); // active | archived | all
-  const [roundFilter,setRoundFilter]=useState("1");      // "1" First Round | "2" Second Round
+  const [roundFilter,setRoundFilter]=useState(lockedRound?String(lockedRound):"1");   // round SEQUENCE as a string
   const [picked,setPicked]=useState(new Set());
   const [loading,setLoading]=useState(false); const [busy,setBusy]=useState(false);
   const [toast,setToast]=useState(null);   // {type:'success'|'error', title, lines:[]}
@@ -1310,7 +1374,7 @@ function DrivesTab() {
       const cutoff=drive.cutoff;
       const ws=XLSX.utils.json_to_sheet(rows.map(c=>({
         Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Course:c.course||"", Branch:c.branch||"",
-        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
+        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college,
         Drive:drive.name, "Drive Type":drive.driveType, Source:c.candidateSource||"PRE_REGISTERED",
         Resume:c.resume?.filename?"Yes":"No",
         Score:c.score??"-", "Total":c.totalMarks??"-",
@@ -1364,15 +1428,18 @@ function DrivesTab() {
   if(!sel) return (
     <div>
       {toastEl}{confirmEl}
-      {showCreate && <CreateDriveModal sections={sections} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
+      {showCreate && <CreateDriveModal sections={sections} rounds={wsRounds} lockedRound={lockedRound || roundFilter} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
         {!isViewer() && <button className="ad-btn ad-btn--primary" onClick={()=>setShowCreate(true)}>+ New Drive</button>}
       </div>
-      {/* Round split — First Round holds every existing/legacy drive (round 1 or unset); Second Round holds drives created as round 2. */}
-      <div className="ad-round-tabs" style={{display:"flex",gap:8,marginBottom:12,borderBottom:"2px solid var(--border)",paddingBottom:2}}>
-        {[["1","🎯 First Round"],["2","🚀 Second Round"]].map(([v,l])=>{
+      {/* Round switcher — hidden when the tab is opened from INSIDE a round:
+          there the page shows only that round's drives. */}
+      {!lockedRound && <div className="ad-round-tabs" style={{display:"flex",gap:8,marginBottom:12,borderBottom:"2px solid var(--border)",paddingBottom:2}}>
+        {(wsRounds && wsRounds.length
+            ? wsRounds.map(r=>[String(r.sequence), `Round ${r.sequence} — ${r.name}`])
+            : [["1","🎯 First Round"],["2","🚀 Second Round"]]).map(([v,l])=>{
           const count=drives.filter(d=>(Number(d.round)||1)===Number(v)).length;
           const on=roundFilter===v;
           return (
@@ -1384,7 +1451,7 @@ function DrivesTab() {
             </button>
           );
         })}
-      </div>
+      </div>}
       <div className="ad-toolbar" style={{marginBottom:14}}>
         {[["active","Active"],["archived","Archived"],["all","All"]].map(([v,l])=>(
           <button key={v} className={`ad-btn ad-btn--sm ${driveFilter===v?"ad-btn--primary":"ad-btn--outline"}`} onClick={()=>setDriveFilter(v)}>{l}</button>
@@ -1705,6 +1772,17 @@ function CandidateProfile({ candidate: c, onClose }) {
   const [ansData, setAnsData] = useState(null);       // { candidate, answers, note? }
   const [ansLoading, setAnsLoading] = useState(false);
   const [ansErr, setAnsErr] = useState("");
+  const [journey, setJourney] = useState(null);       // { currentRound, overallStatus, rounds[] }
+  const [jLoading, setJLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== "journey" || journey || jLoading) return;
+    (async () => {
+      setJLoading(true);
+      try { const r = await fetchCandidateJourney(c._id); setJourney(r.data.data); }
+      catch { setJourney({ rounds: [], overallStatus: "" }); }
+      finally { setJLoading(false); }
+    })();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (tab !== "answers" || ansData || ansLoading) return;
     (async () => {
@@ -1717,7 +1795,7 @@ function CandidateProfile({ candidate: c, onClose }) {
   const sm = STATUS_META.find(s => s.key === c.status) || { label: c.status, color: "#64748B" };
   const pct = (c.score != null && c.totalMarks) ? Math.round(c.score / c.totalMarks * 100) + "%" : "—";
   const v = c.violations || {};
-  const TABS = [["personal","Personal"],["assessment","Assessment"],["answers","Answers"],["security","Security"],["resume","Resume"]];
+  const TABS = [["personal","Personal"],["journey","Journey"],["assessment","Assessment"],["answers","Answers"],["security","Security"],["resume","Resume"]];
   return (
     <div className="ad-overlay" onClick={onClose}>
       <div className="ad-modal ad-modal--wide" onClick={e => e.stopPropagation()}>
@@ -1756,6 +1834,43 @@ function CandidateProfile({ candidate: c, onClose }) {
                 <Field label="Address" value={c.location} />
                 <Field label="Source" value={c.candidateSource === "WALK_IN" ? "Walk-in" : "Pre-registered"} />
               </div>
+            </section>
+          )}
+          {tab === "journey" && (
+            <section className="ad-card-section">
+              <div className="ad-card-section-title">🪜 Recruitment Journey</div>
+              {jLoading ? <div className="ad-loading"><Spinner dark/>Loading…</div> : (
+                <div>
+                  <div style={{marginBottom:12,fontSize:13}}>
+                    Current stage: <strong>{journey?.currentRoundName||"—"}</strong>
+                    {journey?.overallStatus && <span className="ad-badge" style={{marginLeft:8,background:"#4F46E522",color:"#4F46E5"}}>{String(journey.overallStatus).replace(/_/g," ")}</span>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {(journey?.rounds||[]).map(r=>{
+                      const done=r.roundStatus!=="NOT_STARTED";
+                      const icon=r.roundStatus==="SELECTED"?"✓":r.roundStatus==="REJECTED"?"✗":done?"✓":"→";
+                      const col=r.roundStatus==="SELECTED"?"#16A34A":r.roundStatus==="REJECTED"?"#DC2626":done?"#4F46E5":"#94A3B8";
+                      return (
+                        <div key={r.candidateId} style={{border:"1px solid var(--border)",borderRadius:10,padding:"10px 14px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div style={{fontWeight:800}}><span style={{color:col,marginRight:8}}>{icon}</span>{r.roundName}</div>
+                            <span className="ad-badge" style={{background:col+"22",color:col}}>{String(r.roundStatus).replace(/_/g," ")}</span>
+                          </div>
+                          <div style={{fontSize:13,color:"var(--text-2)",marginTop:4,marginLeft:24}}>
+                            {r.score!=null ? <>Score: <strong>{r.score}/{r.totalScore}</strong>{r.percentage!=null?` (${r.percentage}%)`:""}</> : "No result yet"}
+                            {r.driveName?` · ${r.driveName}`:""}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(!journey?.rounds||journey.rounds.length===0) && <div className="ad-empty">No round history found.</div>}
+                    <div style={{border:"1px dashed var(--border)",borderRadius:10,padding:"10px 14px",color:"var(--text-2)"}}>
+                      <span style={{marginRight:8}}>{journey?.overallStatus==="FINALLY_SELECTED"?"✓":"○"}</span>
+                      <strong>Final Selection</strong> — {journey?.overallStatus==="FINALLY_SELECTED"?"Selected":"Pending"}
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           )}
           {tab === "assessment" && (
@@ -1862,19 +1977,20 @@ function AllCandidatesTab() {
   const [rows,setRows]=useState([]); const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
   const [search,setSearch]=useState(""); const [college,setCollege]=useState(""); const [source,setSource]=useState("");
   const [status,setStatus]=useState(""); const [minScore,setMinScore]=useState(""); const [driveId,setDriveId]=useState("");
+  const [round,setRound]=useState("");
   const [colleges,setColleges]=useState([]); const [drives,setDrives]=useState([]);
   const [loading,setLoading]=useState(false); const [exporting,setExporting]=useState(false); const [toast,setToast]=useState(null);
   const showToast=(t)=>{ setToast(t); setTimeout(()=>setToast(null),6000); };
 
   const params=()=>({ page, limit:20, search:search||undefined, college:college||undefined, source:source||undefined,
-    status:status||undefined, minScore:minScore||undefined, assessmentId:driveId||undefined });
+    status:status||undefined, minScore:minScore||undefined, assessmentId:driveId||undefined, round:round||undefined });
 
   const load=useCallback(async({silent=false}={})=>{
     if(!silent) setLoading(true);
     try{ const r=await fetchCandidates(params()); setRows(r.data.data); setPag(r.data.pagination); }
     catch{} finally{ if(!silent) setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[page,search,college,source,status,minScore,driveId]);
+  },[page,search,college,source,status,minScore,driveId,round]);
 
   const [resumeView,setResumeView]=useState(null);
   const [profileCand,setProfileCand]=useState(null);
@@ -1892,8 +2008,8 @@ function AllCandidatesTab() {
       const r=await fetchCandidates({...params(),page:1,limit:99999});
       const ws=XLSX.utils.json_to_sheet((r.data.data||[]).map(c=>({
         Name:c.name, USN:c.usn||"", Email:c.email, Phone:c.phone||"", Course:c.course||"", Branch:c.branch||"",
-        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college, Location:c.location||"",
-        Drive:c.drive?.name||"", "Drive Type":c.drive?.driveType||"", Source:c.candidateSource||"PRE_REGISTERED",
+        Gender:c.gender||"", DOB:c.dob||"", Aadhaar:c.aadhaar||"", College:c.college,
+        Round:c.roundName||"", Drive:c.drive?.name||"", "Drive Type":c.drive?.driveType||"", Source:c.candidateSource||"PRE_REGISTERED",
         Resume:c.resume?.filename?"Yes":"No", Score:c.score??"-", Total:c.totalMarks??"-",
         Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
         Status:c.status, Violations:c.violations?.total||0,
@@ -1923,6 +2039,9 @@ function AllCandidatesTab() {
       </div>
       <div className="ad-toolbar">
         <input className="ad-search" placeholder="Search name, email, USN, Aadhaar, phone…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+        <select className="ad-select" value={round} onChange={e=>{setRound(e.target.value);setPage(1);}}>
+          <option value="">All Rounds</option><option value="1">Aptitude</option><option value="2">Technical Round</option>
+        </select>
         <select className="ad-select" value={driveId} onChange={e=>{setDriveId(e.target.value);setPage(1);}}>
           <option value="">All Drives</option>{drives.map(d=><option key={d._id} value={d._id}>{d.name}</option>)}
         </select>
@@ -1941,7 +2060,7 @@ function AllCandidatesTab() {
         {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
         :rows.length===0?<div className="ad-empty">No candidates match these filters.</div>
         :<table className="ad-table">
-          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>College</th><th>Source</th><th>Drive</th><th>Status</th><th>Score</th><th>Viol.</th><th>Actions</th></tr></thead>
+          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>College</th><th>Source</th><th>Round</th><th>Drive</th><th>Status</th><th>Score</th><th>Viol.</th><th>Actions</th></tr></thead>
           <tbody>{rows.map((c,i)=>{
             const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
             const walkIn=c.candidateSource==="WALK_IN";
@@ -1952,6 +2071,7 @@ function AllCandidatesTab() {
                 <td className="ad-td-sm">{c.email}</td>
                 <td className="ad-td-sm">{c.college}</td>
                 <td><span className="ad-badge" style={{background:(walkIn?"#7C3AED":"#1a56db")+"22",color:walkIn?"#7C3AED":"#1a56db"}}>{walkIn?"Walk-in":"Pre-reg"}</span></td>
+                <td><span className="ad-badge" style={{background:"#4F46E522",color:"#4F46E5"}}>{c.roundName||"—"}</span></td>
                 <td className="ad-td-sm">{c.drive?.name||"—"}</td>
                 <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
                 <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
@@ -1970,32 +2090,229 @@ function AllCandidatesTab() {
   );
 }
 
+// ── Rounds (Aptitude / Technical) segregation dashboard ────────────────────────
+const ROUND_LABELS = { 1: "Aptitude", 2: "Technical Round" };
+function RoundsTab() {
+  const [summary,setSummary]=useState(null);
+  const [round,setRound]=useState(1);              // 1 = Aptitude, 2 = Technical Round
+  const [stats,setStats]=useState(null);
+  const [rows,setRows]=useState([]); const [pag,setPag]=useState({}); const [page,setPage]=useState(1);
+  const [search,setSearch]=useState(""); const [status,setStatus]=useState(""); const [college,setCollege]=useState("");
+  const [colleges,setColleges]=useState([]);
+  const [sel,setSel]=useState(()=>new Set());       // selected candidate ids (bulk move)
+  const [loading,setLoading]=useState(false); const [exporting,setExporting]=useState(false);
+  const [profileCand,setProfileCand]=useState(null); const [resumeView,setResumeView]=useState(null);
+  const [confirmMove,setConfirmMove]=useState(false); const [moving,setMoving]=useState(false);
+  const [toast,setToast]=useState(null); const showToast=(t)=>{ setToast(t); setTimeout(()=>setToast(null),6000); };
+
+  const params=()=>({ page, limit:20, round, search:search||undefined, status:status||undefined, college:college||undefined });
+  const loadSummary=useCallback(async()=>{ try{ const r=await fetchRoundSummary(); setSummary(r.data.data); }catch{} },[]);
+  const loadStats=useCallback(async()=>{ try{ const r=await fetchCandidateStats({round}); setStats(r.data.data); }catch{} },[round]);
+  const load=useCallback(async({silent=false}={})=>{
+    if(!silent) setLoading(true);
+    try{ const r=await fetchCandidates(params()); setRows(r.data.data); setPag(r.data.pagination); }
+    catch{} finally{ if(!silent) setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[page,round,search,status,college]);
+  useEffect(()=>{ loadSummary(); },[loadSummary]);
+  useEffect(()=>{ loadStats(); setSel(new Set()); setPage(1); },[round,loadStats]);
+  useEffect(()=>{ load(); },[load]);
+  useEffect(()=>{ (async()=>{ try{const cl=await fetchDriveColleges({}); setColleges(cl.data.data||[]);}catch{} })(); },[]);
+  useEffect(()=>{ const iv=setInterval(()=>{ if(!profileCand && !resumeView){ load({silent:true}); loadStats(); } },20000); return ()=>clearInterval(iv); },[load,loadStats,profileCand,resumeView]);
+
+  const sc = stats?.statusCounts||{};
+  const cards = [
+    { label:`${ROUND_LABELS[round]} Candidates`, val:(summary?.rounds?.find(r=>r.roundNumber===round)?.total)||pag.total||0, color:"#4F46E5" },
+    { label:"Started",       val:(sc.started||0)+(sc["in-progress"]||0), color:"#0EA5E9" },
+    { label:"Completed",     val:(sc.completed||0)+(sc.shortlisted||0)+(sc.rejected||0), color:"#10B981" },
+    { label:"Selected",      val:sc.shortlisted||0, color:"#16A34A" },
+    { label:"Rejected",      val:(sc.rejected||0)+(sc.disqualified||0), color:"#DC2626" },
+    { label:"Not Attempted", val:(sc.invited||0)+(sc["email-sent"]||0), color:"#64748B" },
+  ];
+
+  const selectable = (c)=> round===1 && c.status==="shortlisted";   // only Aptitude-SELECTED can advance
+  const pageSelectable = rows.filter(selectable).map(c=>c._id);
+  const allSelected = pageSelectable.length>0 && pageSelectable.every(id=>sel.has(id));
+  const toggle=(id)=>setSel(s=>{ const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
+  const toggleAll=()=>setSel(s=>{ const n=new Set(s); if(allSelected) pageSelectable.forEach(id=>n.delete(id)); else pageSelectable.forEach(id=>n.add(id)); return n; });
+  const doMove=async()=>{
+    setMoving(true);
+    try{ const r=await moveToTechnical([...sel]); const d=r.data.data;
+      showToast({type:"success",title:`Moved ${d.moved} candidate(s) to Technical`,lines:[`${d.linkedExistingTechnical||0} existing Technical record(s) linked. ${d.skipped||0} skipped (not Aptitude-selected).`]});
+      setSel(new Set()); setConfirmMove(false); load(); loadSummary();
+    }catch(e){ showToast({type:"error",title:"Move failed",lines:[e.message]}); }
+    finally{ setMoving(false); }
+  };
+
+  const exportRound=async()=>{
+    setExporting(true);
+    try{
+      const r=await fetchCandidates({...params(),page:1,limit:99999});
+      const ws=XLSX.utils.json_to_sheet((r.data.data||[]).map(c=>({
+        Name:c.name, Email:c.email, Phone:c.phone||"", USN:c.usn||"", College:c.college,
+        Round:c.roundName||ROUND_LABELS[round], Drive:c.drive?.name||"",
+        Score:c.score??"-", Total:c.totalMarks??"-",
+        Percentage:(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"-",
+        Status:c.status, "Round Status":c.roundStatus||"", Completed:fmtDate(c.completedAt),
+      })));
+      const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,ROUND_LABELS[round]);
+      XLSX.writeFile(wb,`MH_${ROUND_LABELS[round].replace(/\s+/g,"_")}${status?"_"+status:""}.xlsx`);
+    }catch(e){ showToast({type:"error",title:"Export failed",lines:[e.message]}); } finally{ setExporting(false); }
+  };
+
+  const toastEl = toast && (
+    <div onClick={()=>setToast(null)} style={{position:"fixed",top:18,right:18,zIndex:9999,maxWidth:360,background:toast.type==="error"?"#FEF2F2":"#ECFDF5",border:`1px solid ${toast.type==="error"?"#FECACA":"#A7F3D0"}`,color:toast.type==="error"?"#991B1B":"#065F46",borderRadius:12,padding:"12px 14px",cursor:"pointer"}}>
+      <div style={{fontWeight:800,fontSize:13}}>{toast.title}</div>
+      {(toast.lines||[]).map((l,i)=><div key={i} style={{fontSize:12,marginTop:2}}>{l}</div>)}
+    </div>
+  );
+
+  return (
+    <div>
+      {toastEl}
+      {resumeView && <ResumeViewer candidate={resumeView} onClose={()=>setResumeView(null)} />}
+      {profileCand && <CandidateProfile candidate={profileCand} onClose={()=>setProfileCand(null)} />}
+      {confirmMove && <ConfirmModal title="Move to Technical Round"
+        message={`You are about to move ${sel.size} candidate(s) from Aptitude to Technical Round. Their Aptitude results stay intact. Continue?`}
+        confirmLabel="Move" busyLabel="Moving…" loading={moving} onConfirm={doMove} onCancel={()=>setConfirmMove(false)} />}
+
+      <div className="ad-section-head">
+        <div className="ad-page-title">Rounds</div>
+        <button className="ad-btn ad-btn--export" onClick={exportRound} disabled={exporting}>{exporting?<><Spinner/>Exporting…</>:"⬇ Export Round"}</button>
+      </div>
+
+      {/* Recruitment funnel */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
+        {(summary?.rounds||[]).map(r=>(
+          <button key={r.roundNumber} onClick={()=>setRound(r.roundNumber)}
+            style={{textAlign:"left",cursor:"pointer",flex:"1 1 200px",minWidth:180,border:round===r.roundNumber?"2px solid #4F46E5":"1px solid var(--border)",borderRadius:12,padding:"12px 16px",background:"var(--surface)"}}>
+            <div style={{fontSize:12,color:"var(--text-2)",fontWeight:700}}>{r.roundName}</div>
+            <div style={{fontSize:24,fontWeight:800}}>{r.total}</div>
+            <div style={{fontSize:12,color:"#16A34A",fontWeight:700}}>{r.selected} Selected</div>
+          </button>
+        ))}
+        <div style={{flex:"1 1 200px",minWidth:180,border:"1px dashed var(--border)",borderRadius:12,padding:"12px 16px",background:"var(--surface)"}}>
+          <div style={{fontSize:12,color:"var(--text-2)",fontWeight:700}}>Final Selection</div>
+          <div style={{fontSize:24,fontWeight:800}}>{summary?.final?.selected||0}</div>
+          <div style={{fontSize:12,color:"var(--text-2)"}}>from Technical</div>
+        </div>
+      </div>
+
+      {/* Round toggle */}
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        {[1,2].map(n=>(
+          <button key={n} className={`ad-btn ad-btn--sm ${round===n?"ad-btn--primary":"ad-btn--outline"}`} onClick={()=>setRound(n)}>{ROUND_LABELS[n]}</button>
+        ))}
+      </div>
+
+      {/* Summary cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:16}}>
+        {cards.map(c=>(
+          <div key={c.label} style={{border:"1px solid var(--border)",borderRadius:12,padding:"12px 14px",background:"var(--surface)"}}>
+            <div style={{fontSize:12,color:"var(--text-2)",fontWeight:700}}>{c.label}</div>
+            <div style={{fontSize:22,fontWeight:800,color:c.color}}>{c.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters + move action */}
+      <div className="ad-toolbar">
+        <input className="ad-search" placeholder="Search name, email, phone, USN…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+        <select className="ad-select" value={college} onChange={e=>{setCollege(e.target.value);setPage(1);}}>
+          <option value="">All Colleges</option>{colleges.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="ad-select" value={status} onChange={e=>{setStatus(e.target.value);setPage(1);}}>
+          <option value="">All Status</option>{STATUS_META.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        {round===1 && sel.size>0 && (
+          <button className="ad-btn ad-btn--sm ad-btn--primary" onClick={()=>setConfirmMove(true)}>Move {sel.size} to Technical →</button>
+        )}
+      </div>
+
+      <div className="ad-table-wrap">
+        {loading?<div className="ad-loading"><Spinner dark/>Loading…</div>
+        :rows.length===0?<div className="ad-empty">No candidates in {ROUND_LABELS[round]} match these filters.</div>
+        :<table className="ad-table">
+          <thead><tr>
+            {round===1 && <th style={{width:28}}><input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all selectable on page"/></th>}
+            <th>#</th><th>Name</th><th>College</th><th>Email</th><th>Round</th><th>Score</th><th>%</th><th>Status</th><th>Completed</th><th>Action</th>
+          </tr></thead>
+          <tbody>{rows.map((c,i)=>{
+            const sm=STATUS_META.find(s=>s.key===c.status)||{label:c.status,color:"#64748B"};
+            const pct=(c.score!=null&&c.totalMarks)?Math.round(c.score/c.totalMarks*100)+"%":"—";
+            return (
+              <tr key={c._id}>
+                {round===1 && <td>{selectable(c)?<input type="checkbox" checked={sel.has(c._id)} onChange={()=>toggle(c._id)}/>:null}</td>}
+                <td className="ad-td-num">{(page-1)*20+i+1}</td>
+                <td><div className="ad-td-name"><div className="ad-avatar">{c.name.charAt(0)}</div>{c.name}</div></td>
+                <td className="ad-td-sm">{c.college}</td>
+                <td className="ad-td-sm">{c.email}</td>
+                <td><span className="ad-badge" style={{background:"#4F46E522",color:"#4F46E5"}}>{c.roundName||ROUND_LABELS[round]}</span></td>
+                <td>{c.score!=null?<strong>{c.score}/{c.totalMarks}</strong>:"—"}</td>
+                <td className="ad-td-sm">{pct}</td>
+                <td><span className="ad-badge" style={{background:sm.color+"22",color:sm.color}}>{sm.label}</span></td>
+                <td className="ad-td-sm">{fmtDate(c.completedAt)}</td>
+                <td><button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>setProfileCand(c)}>View</button></td>
+              </tr>
+            );
+          })}</tbody>
+        </table>}
+      </div>
+      <Pagination pag={pag} page={page} setPage={setPage}/>
+    </div>
+  );
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
+/* WORKSPACE-LEVEL navigation. These tabs exist ONLY inside an open workspace —
+ * at the global level the admin manages companies and nothing else. The screens
+ * below are the original ones, now scoped to the open workspace. */
 const TABS = [
-  { id:"dashboard", icon:"📊", label:"Dashboard"  },
-  { id:"drives",    icon:"🎓", label:"Campus Drives" },
-  { id:"allcand",   icon:"🌐", label:"All Candidates" },
-  { id:"questions", icon:"❓", label:"Questions"  },
-  { id:"cutoff",    icon:"🎯", label:"Cutoff"     },
-  { id:"settings",  icon:"⚙️",  label:"Settings"   },
+  { id:"workspace",  icon:"📊", label:"Overview"  },
+  { id:"ws-students",icon:"👥", label:"Students"  },
+  { id:"ws-rounds",  icon:"🪜", label:"Rounds"    },
+  { id:"ws-results", icon:"🏆", label:"Results"   },
+  { id:"questions",  icon:"❓", label:"Questions" },
+  { id:"cutoff",     icon:"🎯", label:"Cutoff"    },
+  { id:"ws-reports", icon:"🤖", label:"Reports"   },
+  { id:"ws-settings",icon:"⚙️",  label:"Settings"  },
 ];
+// Which workspace section each tab renders. There is no drive tab: a workspace
+// runs ONE recruitment process and the admin navigates straight to its rounds.
+const WS_SECTION = {
+  workspace: "overview", "ws-students": "students", "ws-rounds": "rounds",
+  "ws-results": "results", "ws-reports": "reports", "ws-settings": "settings",
+};
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 // ── Assessment Active Mode banner (Render keep-awake) ──────────────────────────
+// Sensible default shutoff: today 10 PM local; if already past, now + 2h.
+// (toLocalInput is defined once, higher up in this file, and reused here.)
+const defaultOff=()=>{ const d=new Date(); d.setHours(22,0,0,0); if(d.getTime()<=Date.now()) d.setTime(Date.now()+2*3600e3); return toLocalInput(d); };
+
 function ActiveModeBanner() {
   const [st,setSt]=useState(null);
   const [busy,setBusy]=useState(false);
   const [warn,setWarn]=useState(false);
+  const [offTime,setOffTime]=useState(defaultOff);   // admin-chosen auto-off time (local)
   const hbRef=useRef(null);
+
+  // Mirror the server's current shutoff time into the picker when active.
+  useEffect(()=>{ if(st?.autoOffAt) setOffTime(toLocalInput(new Date(st.autoOffAt))); },[st?.autoOffAt]);
 
   const load=useCallback(async()=>{ try{const r=await getSystemStatus(); setSt(r.data.data);}catch{} },[]);
   useEffect(()=>{ load(); const iv=setInterval(load,60000); return ()=>clearInterval(iv); },[load]);
 
-  // Heartbeat every 5 min while active (the external request keeps Render awake).
+  // While Active Mode is ON, keep EVERY backend awake — not just the one this
+  // browser picked. warmAllBackends() pings all 6 Render instances directly
+  // (incl. the live-proctoring signaling server). Every 10 min beats Render's
+  // 15-min idle-sleep with margin (pinging at exactly 15 would race the sleep).
+  // sendHeartbeat() still records lastHeartbeat for the status card.
   useEffect(()=>{
     if(st?.activeMode){
-      sendHeartbeat().catch(()=>{});
-      hbRef.current=setInterval(()=>sendHeartbeat().catch(()=>{}),5*60*1000);
+      const tick=()=>{ warmAllBackends(); sendHeartbeat().catch(()=>{}); };
+      tick();
+      hbRef.current=setInterval(tick,10*60*1000);
       return ()=>clearInterval(hbRef.current);
     }
   },[st?.activeMode]);
@@ -2020,7 +2337,7 @@ function ActiveModeBanner() {
           <span className={`ad-status-dot ${active?"ad-status-dot--on":""}`} />
           <div>
             <div className="ad-status-title">{active?"Assessment Mode Active":"Assessment Mode Disabled"}</div>
-            <div className="ad-status-sub">{active?"Backend keep-alive is running":"Backend may sleep between assessments"}</div>
+            <div className="ad-status-sub">{active?`Pinging all ${BACKEND_COUNT} servers every 10 min (incl. live-camera server)`:"Backend may sleep between assessments"}</div>
           </div>
         </div>
         {active && st && (
@@ -2031,11 +2348,24 @@ function ActiveModeBanner() {
             <div><span className="ad-status-k">Auto Shutdown</span><span className="ad-status-v">{fmt(st.autoOffAt)}</span></div>
           </div>
         )}
-        <div className="ad-status-actions">
-          {active && <button className="ad-btn ad-btn--sm ad-btn--outline" disabled={busy} onClick={()=>toggle({extend:true})}>Extend 2h</button>}
-          <button className={`ad-btn ad-btn--sm ${active?"ad-btn--danger":"ad-btn--primary"}`} disabled={busy} onClick={()=>toggle({on:!active})}>
-            {busy?"…":active?"Disable":"Enable"}
-          </button>
+        <div className="ad-status-actions" style={{flexWrap:"wrap",gap:8,alignItems:"flex-end"}}>
+          <label style={{display:"flex",flexDirection:"column",fontSize:11,color:"var(--text-2)",gap:3}}>
+            {active?"Auto-off at (edit to reschedule)":"Auto-off at"}
+            <input type="datetime-local" className="ad-input" style={{padding:"6px 8px",fontSize:13}}
+              value={offTime} min={toLocalInput(new Date())}
+              onChange={e=>setOffTime(e.target.value)} disabled={busy}/>
+          </label>
+          {active
+            ? <>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" disabled={busy}
+                  onClick={()=>toggle({on:true, autoOffAt:new Date(offTime).toISOString()})}>Update time</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" disabled={busy} onClick={()=>toggle({extend:true})}>Extend 2h</button>
+                <button className="ad-btn ad-btn--sm ad-btn--danger" disabled={busy} onClick={()=>toggle({on:false})}>Disable</button>
+              </>
+            : <button className="ad-btn ad-btn--sm ad-btn--primary" disabled={busy}
+                onClick={()=>toggle({on:true, autoOffAt:new Date(offTime).toISOString()})}>
+                {busy?"…":"Enable"}
+              </button>}
         </div>
       </div>
       {warn && (
@@ -2057,6 +2387,59 @@ function ActiveModeBanner() {
   );
 }
 
+/* Workspace → Rounds → Drives.
+ * Loads the rounds of the OPEN workspace and renders the existing DrivesTab
+ * with them, so a round's drives appear under that round. Nothing about the
+ * drive/assessment engine changes — only where the UI lives. */
+function WorkspaceRoundDrives({ readOnly }) {
+  // LEVEL 1: the round list.  LEVEL 2: one round — its cutoff/students and its
+  // drives. A round OWNS both; a drive belongs to exactly one round.
+  const [openRound,setOpenRound]=useState(null);
+  const [sub,setSub]=useState("manage");
+
+  if(!openRound) return <RoundsPage readOnly={readOnly} onOpenRound={(r)=>{setSub("manage");setOpenRound(r);}}/>;
+
+  return (
+    <div>
+      <div className="ws-crumb">
+        <button onClick={()=>setOpenRound(null)}>← Back to Rounds</button>
+        <span>/</span>
+        <span>Round {openRound.sequence} — {openRound.name}</span>
+      </div>
+
+      <div className="ws-sub-tabs">
+        <button className={`ws-sub-tab ${sub==="manage"?"ws-sub-tab--active":""}`} onClick={()=>setSub("manage")}>
+          🎯 Cutoff &amp; Students
+        </button>
+        <button className={`ws-sub-tab ${sub==="drives"?"ws-sub-tab--active":""}`} onClick={()=>setSub("drives")}>
+          🎓 Drives
+        </button>
+      </div>
+
+      {/* Cutoff, preview/apply, advance-to-next-round and this round's student
+          list — scoped to THIS round only. Round 1's cutoff never touches
+          Round 2, and progression stays gated by the backend. */}
+      {sub==="manage" && (
+        <RoundPanel round={openRound} readOnly={readOnly}
+          onBack={()=>setOpenRound(null)} onChanged={()=>{}}/>
+      )}
+
+      {/* The ORIGINAL Campus Drives UI, locked to this round: create/edit,
+          pre-registered upload + invitations, walk-in test codes, schedule,
+          security configuration, export and archive — all unchanged. */}
+      {sub==="drives" && (
+        <div>
+          <div className="ws-hint" style={{marginBottom:12}}>
+            Drives belonging to <strong>{openRound.name}</strong> only. Creating a drive here
+            attaches it to Round {openRound.sequence}.
+          </div>
+          <DrivesTab lockedRound={openRound.sequence} readOnly={readOnly}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ onLogout }) {
   // Theme is scoped to the admin dashboard only (applied to .ad-page, not the
   // document) so it never affects the candidate/walk-in pages.
@@ -2064,7 +2447,14 @@ function Dashboard({ onLogout }) {
   useEffect(()=>{ localStorage.setItem("mh_theme", theme); },[theme]);
   const toggleTheme=()=>setTheme(t=>t==="dark"?"light":"dark");
 
-  const [tab,        setTab]       = useState("dashboard");
+  // Landing screen is the GLOBAL OVERVIEW (Level 1) — workspace management only.
+  const [tab,        setTab]       = useState("workspace");
+  // Level detector. No workspace open = global level, where the recruitment
+  // tabs below do not exist at all (they are not rendered, not merely hidden).
+  const wsCtx = useWorkspace();
+  const inWorkspace = !!wsCtx?.activeId;
+  // Leaving a workspace always returns to the workspace-management screen.
+  useEffect(()=>{ if(!inWorkspace) setTab("workspace"); },[inWorkspace]);
   const [stats,      setStats]     = useState(null);
   const [overview,   setOverview]  = useState(null);
   const [users,      setUsers]     = useState([]);
@@ -2135,11 +2525,10 @@ function Dashboard({ onLogout }) {
 
   useEffect(()=>{
     loadSections();
-    if(tab==="dashboard") { loadOverview(); loadStats(); }
     if(tab==="students")  loadUsers();
     if(tab==="attempts")  loadAttempts();
     if(tab==="questions") { loadSections(); loadQuestions(); }
-    if(tab==="settings")  loadSettings();
+    if(tab==="ws-settings") loadSettings();
   },[tab]);
   useEffect(()=>{ if(tab==="students")  loadUsers(); },[userPage,userSearch,userStatus,userMin]);
   useEffect(()=>{ if(tab==="attempts")  loadAttempts(); },[attPage,attSearch,attStatus,attPassed]);
@@ -2207,6 +2596,7 @@ function Dashboard({ onLogout }) {
           </div>
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <WorkspaceSwitcherSlot readOnly={isViewer()}/>
           <button className="ad-theme-toggle" onClick={toggleTheme} title={theme==="dark"?"Switch to light mode":"Switch to dark mode"} aria-label="Toggle theme">
             <span className="ad-theme-knob">{theme==="dark"?"🌙":"☀️"}</span>
           </button>
@@ -2216,76 +2606,33 @@ function Dashboard({ onLogout }) {
 
       {!isViewer() && <div style={{padding:"0 0"}}><ActiveModeBanner/></div>}
 
-      <nav className="ad-tabs">
-        {TABS.filter(t=>!isViewer() || !["questions","cutoff","settings"].includes(t.id)).map(t=>(
-          <button key={t.id} className={`ad-tab ${tab===t.id?"ad-tab--active":""}`} onClick={()=>setTab(t.id)}>
-            <span>{t.icon}</span>{t.label}
-          </button>
-        ))}
-      </nav>
+      {/* GLOBAL LEVEL has no recruitment navigation — the tab bar exists only
+          once a workspace is open. */}
+      {inWorkspace && (
+        <nav className="ad-tabs">
+          {TABS.filter(t=>!isViewer() || !["questions","cutoff","settings"].includes(t.id)).map(t=>(
+            <button key={t.id} className={`ad-tab ${tab===t.id?"ad-tab--active":""}`} onClick={()=>setTab(t.id)}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       <main className="ad-content">
 
-        {tab==="dashboard" && (
-          <div>
-            <div className="ad-page-title">Dashboard Overview</div>
-            {!overview && <div className="ad-loading"><Spinner dark/>Loading overview…</div>}
-            {overview && (
-              <>
-                <div className="ad-kpi-grid">
-                  {[
-                    {label:"Total Drives",            val:overview.drives.total,            icon:"🎓",color:"#6366F1",sub:`${overview.drives.active} active`},
-                    {label:"Active Drives",           val:overview.drives.active,           icon:"🟢",color:"#10B981",sub:"running now"},
-                    {label:"Archived Drives",         val:overview.drives.archived,         icon:"🗄️",color:"#64748B",sub:"closed"},
-                    {label:"Total Candidates",        val:overview.candidates.total,        icon:"👥",color:"#06B6D4",sub:"all drives"},
-                    {label:"Walk-In Candidates",      val:overview.candidates.walkIn,       icon:"🚶",color:"#8B5CF6",sub:"test-code"},
-                    {label:"Pre-Registered",          val:overview.candidates.preRegistered,icon:"✉️",color:"#3B82F6",sub:"invited"},
-                    {label:"Selected (≥ cutoff)",     val:overview.candidates.selected,     icon:"🏆",color:"#F59E0B",sub:"above cutoff"},
-                    {label:"Avg Score",               val:overview.candidates.avgScore,     icon:"📈",color:"#0EA5E9",sub:"mean result"},
-                  ].map(s=>(
-                    <div key={s.label} className="ad-kpi" style={{"--kpi":s.color}}>
-                      <div className="ad-kpi-icon">{s.icon}</div>
-                      <div className="ad-kpi-body">
-                        <div className="ad-kpi-label">{s.label}</div>
-                        <div className="ad-kpi-val">{s.val}</div>
-                        <div className="ad-kpi-sub">{s.sub}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
 
-                <div className="ad-page-title" style={{marginTop:24,fontSize:16}}>Recent Activity</div>
-                <div className="ad-table-wrap" style={{padding:overview.recentActivity?.length?"6px 4px":0}}>
-                  {(!overview.recentActivity||!overview.recentActivity.length)
-                    ? <div className="ad-empty">No recent activity.</div>
-                    : <div className="ad-timeline">
-                        {overview.recentActivity.map((a,i)=>{
-                          const m = a.type==="completed"?{icon:"✅",c:"#059669"}
-                            :a.type==="disqualified"?{icon:"⛔",c:"#DC2626"}
-                            :a.type==="drive"?{icon:"🎓",c:"#1a56db"}
-                            :{icon:"📝",c:"#7C3AED"};
-                          return (
-                            <div key={i} className="ad-tl-item">
-                              <div className="ad-tl-dot" style={{background:m.c+"22",color:m.c,borderColor:m.c+"55"}}>{m.icon}</div>
-                              <div className="ad-tl-body">
-                                <div className="ad-tl-text">{a.text}
-                                  {a.source && <span className="ad-badge ad-badge--gray" style={{marginLeft:8}}>{a.source==="WALK_IN"?"Walk-in":a.source==="PRE_REGISTERED"?"Pre-reg":a.source}</span>}
-                                </div>
-                                <div className="ad-tl-time">{fmtDateTime(a.at)}</div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        {/* Global overview (no workspace open) and every workspace section are
+            rendered by the same module — the section decides which screen. */}
+        {WS_SECTION[tab] && WS_SECTION[tab] !== "rounds" &&
+          <WorkspaceModule readOnly={isViewer()} section={WS_SECTION[tab]}/>}
 
-        {tab==="drives" && <DrivesTab/>}
-
-        {tab==="allcand" && <AllCandidatesTab/>}
+        {/* ROUNDS → DRIVES. The workspace's rounds drive the tabs; each round
+            holds its own drives. This is the ORIGINAL Campus Drives UI (create,
+            edit, upload candidates, invitations, walk-in test codes, security
+            config, export, archive) reused unchanged inside the round. */}
+        {WS_SECTION[tab] === "rounds" && (inWorkspace
+          ? <WorkspaceRoundDrives readOnly={isViewer()}/>
+          : <WorkspaceModule readOnly={isViewer()} section="rounds"/>)}
 
         {tab==="students" && (
           <div>
@@ -2393,6 +2740,9 @@ function Dashboard({ onLogout }) {
                     <option value="C">Set C</option>
                     <option value="D">Set D</option>
                   </optgroup>
+                  <optgroup label="Trainer (DS/DA)">
+                    <option value="T">Set T</option>
+                  </optgroup>
                 </select>
               )}
               <select className="ad-select" value={qSection} onChange={e=>setQSection(e.target.value)}>
@@ -2421,7 +2771,11 @@ function Dashboard({ onLogout }) {
                           {(() => {
                             const si = allSections.findIndex(s=>s.name===q.section);
                             const clr = sectionColor(allSections[si]||{},si);
-                            const lbl = allSections.find(s=>s.name===q.section)?.displayName||q.section;
+                            // Round-2 sections aren't in the round-1 pool, so fall back to
+                            // the tech/trainer section labels before showing the raw key.
+                            const lbl = allSections.find(s=>s.name===q.section)?.displayName
+                                     || TECH_SECTION_OPTS.find(s=>s.name===q.section)?.displayName
+                                     || q.section;
                             return <span className="ad-q-sec-pill" style={{background:clr+"22",color:clr}}>{lbl}</span>;
                           })()}
                           <span className="ad-q-marks">{q.marks}M</span>
@@ -2434,8 +2788,8 @@ function Dashboard({ onLogout }) {
                       </div>
                       {q.type==="text" ? (
                         <div className="ad-q-opts">
-                          <div className="ad-q-opt ad-q-opt--correct">✓ Answer: {q.answerText}</div>
-                          <div className="ad-q-opt" style={{opacity:.7}}>Typed-answer question{q.round===2&&q.set?` · Round 2 · Set ${q.set}`:""}</div>
+                          <div className="ad-q-opt ad-q-opt--correct" style={{whiteSpace:"pre-wrap"}}>{q.longAnswer?"📝 Rubric: ":"✓ Answer: "}{q.answerText}</div>
+                          <div className="ad-q-opt" style={{opacity:.7}}>{q.longAnswer?"Open-ended — marked by hand":"Typed-answer question"}{q.round===2&&q.set?` · Round 2 · Set ${q.set}`:""}</div>
                         </div>
                       ) : (
                         <div className="ad-q-opts">
@@ -2456,7 +2810,9 @@ function Dashboard({ onLogout }) {
 
         {tab==="cutoff" && <CutoffTab/>}
 
-        {tab==="settings" && (
+        {/* Quiz configuration (time limit, passing score, sections) lives under
+            the workspace Settings tab so nothing became unreachable. */}
+        {tab==="ws-settings" && (
           <div className="ad-settings-wrap">
             <div className="ad-settings-card">
               <div className="ad-page-title">Quiz Settings</div>
@@ -2568,5 +2924,12 @@ export default function AdminDashboard({ mode = "admin" }) {
     return hasToken;
   });
   if(!loggedIn) return <LoginScreen mode={mode} onLogin={()=>setLoggedIn(true)}/>;
-  return <Dashboard onLogout={()=>{ clearAdminToken(); setLoggedIn(false); }}/>;
+  // The provider must sit ABOVE Dashboard: Dashboard itself calls useWorkspace()
+  // to decide whether to show the workspace navigation, and a component can only
+  // read a context supplied by an ancestor.
+  return (
+    <WorkspaceProvider>
+      <Dashboard onLogout={()=>{ clearAdminToken(); setLoggedIn(false); }}/>
+    </WorkspaceProvider>
+  );
 }

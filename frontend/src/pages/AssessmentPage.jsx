@@ -1304,13 +1304,26 @@ export default function AssessmentPage() {
               <div className="qp-ref" dangerouslySetInnerHTML={{ __html: q.reference }} />
             )}
             {q?.type === "text" ? (
-              // Round-2 typed-answer question — no options; candidate types the exact output.
+              // Round-2 typed-answer question — no options; candidate types the answer.
+              // `longAnswer` marks an open-ended/essay question, which needs room to write.
               <div className="qp-text-answer">
-                <label className="qp-text-label">Type the exact output / answer:</label>
-                <input className="qp-text-input" type="text" value={answers[q.id] ?? ""}
-                  placeholder="Type your answer here…" autoComplete="off" spellCheck={false}
-                  onChange={(e) => setTextAns(e.target.value)} />
-                <span className="qp-text-hint">Enter your answer exactly. Spacing and case are ignored during evaluation.</span>
+                <label className="qp-text-label">
+                  {q.longAnswer ? "Write your answer:" : "Type the exact output / answer:"}
+                </label>
+                {q.longAnswer ? (
+                  <textarea className="qp-text-input qp-textarea" rows={9} value={answers[q.id] ?? ""}
+                    placeholder="Write your answer here…" spellCheck={false}
+                    onChange={(e) => setTextAns(e.target.value)} />
+                ) : (
+                  <input className="qp-text-input" type="text" value={answers[q.id] ?? ""}
+                    placeholder="Type your answer here…" autoComplete="off" spellCheck={false}
+                    onChange={(e) => setTextAns(e.target.value)} />
+                )}
+                <span className="qp-text-hint">
+                  {q.longAnswer
+                    ? "Explain your reasoning in your own words. This answer is reviewed by an evaluator."
+                    : "Enter your answer exactly. Spacing and case are ignored during evaluation."}
+                </span>
               </div>
             ) : (
               <div className="qp-opts">

@@ -4,6 +4,7 @@ const Candidate  = require("../models/Candidate");
 const Question   = require("../models/Question");
 const Counter    = require("../models/Counter");
 const { generateUniqueToken } = require("../utils/tokens");
+const { legacyScope } = require("../utils/legacyScope");
 const { buildLink, queueThankYou, queueDisqualification, flushNow } = require("../utils/emailQueue");
 
 // Generate a RANDOM, non-guessable walk-in test code (e.g. MH7K3QP9). Sequential
@@ -121,9 +122,16 @@ exports.createAssessment = async (req, res) => {
 
 exports.listAssessments = async (req, res) => {
   try {
-    const list = await Assessment.find().sort({ createdAt: -1 }).lean();
+    // LEGACY SCOPE: a round's test in the new architecture is also an Assessment,
+    // but it belongs to a workspace drive and is never a drive itself. Excluding
+    // those keeps this list showing exactly the drives it always showed.
+    // A round's test container is an implementation detail of the round, never a
+    // drive. Excluding it here is what stops "one drive per round" appearing.
+    const list = await Assessment.find({ ...legacyScope(req), isTest: { $ne: true } })
+      .sort({ createdAt: -1 }).lean();
     // Attach candidate counts per assessment in one grouped query
     const counts = await Candidate.aggregate([
+      { $match: legacyScope(req) },
       { $group: { _id: "$assessmentId", total: { $sum: 1 },
         completed: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } } } },
     ]);
@@ -371,13 +379,24 @@ exports.listCandidates = async (req, res) => {
     // return everyone. The list omits resume base64 (select below), so a large
     // page stays light. The paginated table still passes limit=20.
     const limit  = Math.min(100000, parseInt(req.query.limit) || 20);
-    const { assessmentId, college, status, search, source, minScore } = req.query;
+    const { assessmentId, college, status, search, source, minScore, round, techEligible } = req.query;
 
-    const filter = {};
+    // LEGACY SCOPE: this endpoint serves the original (pre-workspace) screens,
+    // which have no concept of a workspace. Records created by the new
+    // multi-workspace flow carry workspaceId and belong to their own screens —
+    // excluding them keeps this list showing exactly what it always showed.
+    const filter = { ...legacyScope(req) };
     if (assessmentId) filter.assessmentId = assessmentId;   // omit → global (all drives)
+    // Round filter — authoritative: resolve to the drives whose Assessment.round matches,
+    // so round always comes from the drive, never from UI text. (Round 1 = Aptitude, 2 = Technical.)
+    if (!assessmentId && round) {
+      const roundIds = await Assessment.find({ round: Number(round) }).distinct("_id");
+      filter.assessmentId = { $in: roundIds };
+    }
     if (college) filter.college = college;
     if (status) filter.status = status;
     if (source) filter.candidateSource = source;
+    if (techEligible === "true") filter.techEligible = true;
     if (minScore !== undefined && minScore !== "") filter.score = { $gte: parseInt(minScore) || 0 };
     if (search) {
       const re = new RegExp(escapeRegex(String(search).trim()), "i");
@@ -387,18 +406,23 @@ exports.listCandidates = async (req, res) => {
     const [rows, total] = await Promise.all([
       Candidate.find(filter)
         .select("name email college candidateSource usn phone gender dob aadhaar location course branch resume.filename resume.ext resume.mime resume.size resume.url resume.uploadedAt status emailStatus emailScheduledAt emailSentAt shortlistEmail thankYouEmailSentAt disqualificationEmailSentAt score totalMarks passed violations refreshCount terminationReason geo submissionReason startedAt completedAt token tokenExpiresAt createdAt")
-        .populate("assessmentId", "name driveType cutoff")  // drive context for the global view
+        .populate("assessmentId", "name driveType cutoff round")  // drive context for the global view
         .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Candidate.countDocuments(filter),
     ]);
-    const data = rows.map(c => ({
-      ...c,
-      drive: c.assessmentId && typeof c.assessmentId === "object"
-        ? { _id: c.assessmentId._id, name: c.assessmentId.name, driveType: c.assessmentId.driveType, cutoff: c.assessmentId.cutoff }
-        : null,
-      assessmentId: c.assessmentId?._id || c.assessmentId,
-      link: buildLink(c.token), token: undefined,
-    }));
+    const data = rows.map(c => {
+      const drv = c.assessmentId && typeof c.assessmentId === "object" ? c.assessmentId : null;
+      const roundNo = drv?.round ?? c.round ?? null;   // authoritative: from the drive
+      return {
+        ...c,
+        drive: drv ? { _id: drv._id, name: drv.name, driveType: drv.driveType, cutoff: drv.cutoff, round: drv.round } : null,
+        round: roundNo,
+        roundName: Candidate.roundName(roundNo),
+        roundStatus: Candidate.roundStatusOf(c.status),
+        assessmentId: c.assessmentId?._id || c.assessmentId,
+        link: buildLink(c.token), token: undefined,
+      };
+    });
     res.json({ success: true, data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     console.error("listCandidates:", err);
@@ -409,12 +433,17 @@ exports.listCandidates = async (req, res) => {
 // Counters by status + by college for the drive dashboard
 exports.candidateStats = async (req, res) => {
   try {
-    const match = {};
+    // Legacy scope — see listCandidates.
+    const match = { ...legacyScope(req) };
     if (req.query.assessmentId) {
       if (!mongoose.isValidObjectId(req.query.assessmentId)) {
         return res.status(400).json({ success: false, message: "Invalid assessmentId." });
       }
       match.assessmentId = new mongoose.Types.ObjectId(req.query.assessmentId);
+    } else if (req.query.round) {
+      // Round-scoped stats — authoritative from Assessment.round (all drives of that round).
+      const roundIds = await Assessment.find({ round: Number(req.query.round) }).distinct("_id");
+      match.assessmentId = { $in: roundIds };
     }
 
     const [byStatus, byCollege, totals] = await Promise.all([
@@ -465,12 +494,166 @@ exports.candidateStats = async (req, res) => {
   }
 };
 
+/* =====================================================================
+ *  ROUND SEGREGATION  (Round 1 = Aptitude, Round 2 = Technical Round)
+ *  Additive: existing per-drive candidate records ARE the per-round result
+ *  records. Round is always read from Assessment.round (never UI text).
+ * ===================================================================== */
+
+// Identity helpers for linking a person's separate per-round records.
+const _em = (s) => String(s || "").trim().toLowerCase();
+const _ph = (s) => { const d = String(s || "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : ""; };
+
+// Fold raw status counts into the funnel numbers the dashboard shows.
+function funnelFrom(statusMap) {
+  const g = (...ks) => ks.reduce((t, k) => t + (statusMap[k] || 0), 0);
+  return {
+    total:       g("invited", "email-sent", "started", "in-progress", "completed", "shortlisted", "rejected", "disqualified"),
+    notAttempted: g("invited", "email-sent"),
+    started:     g("started", "in-progress"),
+    completed:   g("completed", "shortlisted", "rejected"),   // finished the test (decisions are post-completion)
+    selected:    g("shortlisted"),
+    rejected:    g("rejected", "disqualified"),
+  };
+}
+
+// GET /api/assessments/rounds/summary — Aptitude → Technical → Final funnel.
+exports.roundSummary = async (_req, res) => {
+  try {
+    const scope = legacyScope(_req);
+    const [r1Ids, r2Ids] = await Promise.all([
+      Assessment.find({ round: 1, ...scope }).distinct("_id"),
+      Assessment.find({ round: 2, ...scope }).distinct("_id"),
+    ]);
+    const countsFor = async (ids) => {
+      const agg = await Candidate.aggregate([
+        // Legacy scope — workspace records have their own round dashboards.
+        { $match: { assessmentId: { $in: ids }, ...legacyScope(_req) } },
+        { $group: { _id: "$status", n: { $sum: 1 } } },
+      ]);
+      const m = {}; agg.forEach(a => { m[a._id] = a.n; });
+      return funnelFrom(m);
+    };
+    const [apt, tech] = await Promise.all([countsFor(r1Ids), countsFor(r2Ids)]);
+    res.json({ success: true, data: {
+      rounds: [
+        { roundNumber: 1, roundName: Candidate.roundName(1), ...apt },
+        { roundNumber: 2, roundName: Candidate.roundName(2), ...tech },
+      ],
+      final: { roundName: "Final Selection", selected: tech.selected },
+    }});
+  } catch (err) {
+    console.error("roundSummary:", err);
+    res.status(500).json({ success: false, message: "Failed to load round summary." });
+  }
+};
+
+// GET /api/assessments/candidates/:id/journey — the person's full round history.
+// Links records by masterId (authoritative) else by exact email/phone identity.
+exports.candidateJourney = async (req, res) => {
+  try {
+    const c = await Candidate.findById(req.params.id).lean();
+    if (!c) return res.status(404).json({ success: false, message: "Candidate not found." });
+
+    let linked;
+    if (c.masterId) {
+      linked = await Candidate.find({ $or: [{ masterId: c.masterId }, { _id: c.masterId }] })
+        .populate("assessmentId", "name round").lean();
+    } else {
+      const or = [{ email: _em(c.email) }];
+      const p = _ph(c.phone);
+      if (p) or.push({ phone: new RegExp(p + "$") });
+      linked = await Candidate.find({ $or: or }).populate("assessmentId", "name round").lean();
+    }
+
+    const stageOf = (x) => {
+      const drv = x.assessmentId && typeof x.assessmentId === "object" ? x.assessmentId : null;
+      const roundNo = drv?.round ?? x.round ?? null;
+      const rs = Candidate.roundStatusOf(x.status);
+      const started = ["started", "in-progress", "completed", "shortlisted", "rejected", "disqualified"].includes(x.status);
+      return {
+        candidateId: String(x._id),
+        roundNumber: roundNo,
+        roundName: Candidate.roundName(roundNo),
+        driveName: drv?.name || "",
+        status: x.status,
+        roundStatus: rs,
+        // RESULT ISOLATION: only expose a score if this record actually took THIS round.
+        score: started ? x.score : null,
+        totalScore: started ? x.totalMarks : null,
+        percentage: (started && x.score != null && x.totalMarks) ? Math.round((x.score / x.totalMarks) * 100) : null,
+        startedAt: x.startedAt || null,
+        completedAt: x.completedAt || null,
+      };
+    };
+    const rounds = linked.map(stageOf)
+      .filter(r => r.roundNumber != null)
+      .sort((a, b) => a.roundNumber - b.roundNumber);
+
+    const currentRound = rounds.length ? Math.max(...rounds.map(r => r.roundNumber)) : (c.round || 1);
+    const techSelected = rounds.some(r => r.roundNumber === 2 && r.roundStatus === "SELECTED");
+    const anyRejected  = rounds.some(r => r.roundStatus === "REJECTED");
+    const overallStatus = techSelected ? "FINALLY_SELECTED" : anyRejected ? "REJECTED" : "IN_PROGRESS";
+
+    res.json({ success: true, data: {
+      candidate: { name: c.name, email: c.email, phone: c.phone, college: c.college },
+      currentRound, currentRoundName: Candidate.roundName(currentRound),
+      overallStatus, rounds,
+    }});
+  } catch (err) {
+    console.error("candidateJourney:", err);
+    res.status(500).json({ success: false, message: "Failed to load candidate journey." });
+  }
+};
+
+// POST /api/assessments/rounds/move-to-technical  { candidateIds:[...] }
+// Advances Aptitude-SELECTED candidates to the Technical round. Idempotent, never
+// duplicates: sets techEligible + a stable masterId, and links any existing Round-2
+// record of the same person to that masterId. Aptitude results are left untouched.
+exports.moveToTechnical = async (req, res) => {
+  try {
+    const { candidateIds } = req.body || {};
+    if (!Array.isArray(candidateIds) || !candidateIds.length) {
+      return res.status(400).json({ success: false, message: "No candidates selected." });
+    }
+    const r2Ids = await Assessment.find({ round: 2 }).distinct("_id");
+    const r2Set = new Set(r2Ids.map(String));
+
+    let moved = 0, skipped = 0, linked = 0;
+    const cands = await Candidate.find({ _id: { $in: candidateIds } });
+    for (const c of cands) {
+      // ENFORCE PROGRESSION: only Aptitude records that are SELECTED (shortlisted) advance.
+      const roundNo = c.round ?? null;
+      const isAptitude = roundNo === 1 || (roundNo == null && !r2Set.has(String(c.assessmentId)));
+      if (!isAptitude || c.status !== "shortlisted") { skipped++; continue; }
+
+      const master = c.masterId || c._id;         // stable person key = the Aptitude record id
+      if (!c.techEligible || !c.masterId) {
+        c.techEligible = true; c.masterId = master; await c.save(); moved++;
+      }
+      // Link an existing Round-2 record of the same person (exact email or phone) to the master.
+      const p = _ph(c.phone);
+      const idOr = [{ email: _em(c.email) }]; if (p) idOr.push({ phone: new RegExp(p + "$") });
+      const r2rec = await Candidate.findOne({ assessmentId: { $in: r2Ids }, $or: idOr });
+      if (r2rec && String(r2rec.masterId || "") !== String(master)) {
+        r2rec.masterId = master; await r2rec.save(); linked++;
+      }
+    }
+    res.json({ success: true, data: { requested: candidateIds.length, moved, alreadyEligible: cands.length - moved - skipped, skipped, linkedExistingTechnical: linked } });
+  } catch (err) {
+    console.error("moveToTechnical:", err);
+    res.status(500).json({ success: false, message: "Failed to move candidates." });
+  }
+};
+
 // Campus overview metrics + recent activity for the admin Dashboard tab.
 exports.overviewStats = async (req, res) => {
   try {
+    // Legacy scope — the original dashboard counts only pre-workspace records.
+    const LEGACY = legacyScope(req);
     const [driveAgg, candAgg, selectedAgg, recentCands, recentDrives] = await Promise.all([
-      Assessment.aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
-      Candidate.aggregate([{ $group: {
+      Assessment.aggregate([{ $match: LEGACY }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
+      Candidate.aggregate([{ $match: LEGACY }, { $group: {
         _id: null,
         total: { $sum: 1 },
         walkIn: { $sum: { $cond: [{ $eq: ["$candidateSource", "WALK_IN"] }, 1, 0] } },
@@ -528,7 +711,9 @@ exports.overviewStats = async (req, res) => {
 
 exports.listColleges = async (req, res) => {
   try {
-    const filter = req.query.assessmentId ? { assessmentId: req.query.assessmentId } : {};
+    // Legacy scope — see listCandidates.
+    const filter = { ...legacyScope(req) };
+    if (req.query.assessmentId) filter.assessmentId = req.query.assessmentId;
     const colleges = await Candidate.distinct("college", filter);
     res.json({ success: true, data: colleges.sort() });
   } catch (err) {
@@ -839,7 +1024,7 @@ async function buildPaper(assessment, set = null) {
       if (q.type === "text") {
         // Typed-answer: no options, no answer leaked to the client. `reference`
         // carries shared HTML (e.g. SQL tables) shown with the question.
-        clientQuestions.push({ id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text, type: "text", marks: q.marks || 1, ...(q.reference ? { reference: q.reference } : {}) });
+        clientQuestions.push({ id: qid, section: q.section, sectionLabel: sec.displayName || sec.name, text: q.text, type: "text", marks: q.marks || 1, ...(q.longAnswer ? { longAnswer: true } : {}), ...(q.reference ? { reference: q.reference } : {}) });
       } else {
         const idxs = (q.options || []).map((_, i) => i);
         const dispIdxs = assessment.randomizeOptions ? shuffle(idxs) : idxs;
@@ -871,7 +1056,7 @@ async function rehydratePaper(progress, assessment) {
     const q = map[qid];
     if (!q) return;
     if (q.type === "text") {
-      clientQuestions.push({ id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section, text: q.text, type: "text", marks: q.marks || 1, ...(q.reference ? { reference: q.reference } : {}) });
+      clientQuestions.push({ id: qid, section: q.section, sectionLabel: labelMap[q.section] || q.section, text: q.text, type: "text", marks: q.marks || 1, ...(q.longAnswer ? { longAnswer: true } : {}), ...(q.reference ? { reference: q.reference } : {}) });
     } else {
       const dispIdxs = optionOrder[qid] || (q.options || []).map((_, i) => i);
       clientQuestions.push({
@@ -926,10 +1111,62 @@ exports.getCandidate = async (req, res) => {
   }
 };
 
+/*
+ * NEW-ARCHITECTURE GATE — round eligibility + mandatory registration fields.
+ *
+ * Runs ONLY for records written by the multi-workspace flow (they carry
+ * roundId + applicationId). Legacy candidates have neither field, so they skip
+ * this entirely and behave exactly as they always have.
+ *
+ * This is the server-side enforcement of round progression: a candidate who has
+ * not QUALIFIED the previous round cannot start the next one, no matter what
+ * URL or API call they use. Hiding a button in the UI is never the control.
+ */
+async function assertRoundAccess(c) {
+  if (!c.roundId || !c.applicationId) return null;   // legacy record — no gate
+
+  const Round = require("../models/Round");
+  const CandidateApplication = require("../models/CandidateApplication");
+  const Student = require("../models/Student");
+  const { assertEligible, missingRequiredFields } = require("../utils/recruitment");
+
+  const [round, application] = await Promise.all([
+    Round.findById(c.roundId),
+    CandidateApplication.findById(c.applicationId),
+  ]);
+  if (!round || !application) {
+    const e = new Error("This assessment is no longer available."); e.status = 404; throw e;
+  }
+  // Throws RuleError(403) when the previous round was not qualified.
+  await assertEligible(application, round);
+
+  const student = await Student.findById(application.studentId).lean();
+  const missing = await missingRequiredFields(application, student);
+  if (missing.length) {
+    const e = new Error("Please complete your registration details before starting the test.");
+    e.status = 428; e.state = "registration-incomplete"; e.missing = missing;
+    throw e;
+  }
+  return round;
+}
+
 // POST /api/candidate/:token/start  — begin (or return existing) paper
 exports.startCandidate = async (req, res) => {
   try {
     const c = req.candidate;
+
+    // Round-progression + registration gate (new architecture only).
+    try {
+      await assertRoundAccess(c);
+    } catch (gate) {
+      return res.status(gate.status || 403).json({
+        success: false, message: gate.message,
+        ...(gate.state ? { state: gate.state } : {}),
+        ...(gate.missing ? { missing: gate.missing } : {}),
+        ...(gate.requiredRound ? { requiredRound: gate.requiredRound } : {}),
+      });
+    }
+
     const assessment = await Assessment.findById(c.assessmentId).lean();
     if (!assessment) return res.status(404).json({ success: false, message: "Assessment not found." });
 
@@ -1016,6 +1253,8 @@ exports.startCandidate = async (req, res) => {
       return res.status(400).json({ success: false, message: "No questions configured for this assessment." });
     }
     c.status = "in-progress";
+    // Mirror the engine state onto the round vocabulary (new architecture only).
+    if (c.roundId) c.roundStatus = "IN_PROGRESS";
     c.startedAt = new Date();
     c.progress = {
       questionOrder, optionOrder, answers: {}, review: [], visited: [],
@@ -1140,6 +1379,9 @@ exports.submitCandidate = async (req, res) => {
     // Disqualification (auto-terminate on malpractice) vs normal completion.
     const disqualified = reason === "auto-malpractice";
     c.status = disqualified ? "disqualified" : "completed";
+    // Mirror onto the round vocabulary (new architecture only). Qualification is
+    // NOT decided here — that is the round cutoff's job.
+    if (c.roundId) c.roundStatus = disqualified ? "REJECTED" : "COMPLETED";
     c.submissionReason = disqualified ? "disqualified" : (timedOut ? "timed-out" : "manual");
     if (disqualified) c.terminationReason = String(terminationReason || "Assessment guidelines violated").slice(0, 200);
     c.completedAt = new Date();

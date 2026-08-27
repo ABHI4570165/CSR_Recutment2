@@ -1,10 +1,13 @@
 const Question  = require("../models/Question");
 const { refreshCache } = require("./quizController");
+const { legacyScope } = require("../utils/legacyScope");
 
 // ── List questions (optionally by section / round / set / type) ───────────────
 exports.getQuestions = async (req, res) => {
   try {
-    const filter = {};
+    // The question bank belongs to the open workspace — another workspace's
+    // questions never match this filter.
+    const filter = { ...legacyScope(req) };
     if (req.query.section) filter.section = req.query.section;
     if (req.query.round)   filter.round = parseInt(req.query.round);
     if (req.query.set)     filter.set = req.query.set;
@@ -26,12 +29,12 @@ function buildQuestionDoc(b) {
       return { error: "MCQ needs text, 4 options, correctIndex and section." };
     }
     return { doc: { text: String(b.text).trim(), type, options: b.options, correctIndex: b.correctIndex,
-      answerText: null, marks: b.marks || 1, section: b.section,
+      answerText: null, longAnswer: false, marks: b.marks || 1, section: b.section,
       ...(b.round != null ? { round: parseInt(b.round) || 1 } : {}), ...(b.set != null ? { set: b.set || null } : {}) } };
   }
   if (!b.answerText || !String(b.answerText).trim()) return { error: "Text questions need an expected answer." };
   return { doc: { text: String(b.text).trim(), type, options: undefined, correctIndex: null,
-    answerText: String(b.answerText).trim(), marks: b.marks || 1, section: b.section,
+    answerText: String(b.answerText).trim(), longAnswer: !!b.longAnswer, marks: b.marks || 1, section: b.section,
     ...(b.reference !== undefined ? { reference: b.reference || null } : {}),
     ...(b.round != null ? { round: parseInt(b.round) || 1 } : {}), ...(b.set != null ? { set: b.set || null } : {}) } };
 }

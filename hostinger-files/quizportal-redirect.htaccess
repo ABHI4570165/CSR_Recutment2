@@ -1,0 +1,14 @@
+# Place this file as ".htaccess" inside the quizportal subdomain's folder ONLY
+# (e.g. /home/.../domains/mandi-hariyanna-academy.com/public_html/quizportal/).
+#
+# Purpose: the old invitation emails point to quizportal.mandi-hariyanna-academy.com,
+# but the live app + backend CORS use testportal. This 301-redirects every
+# quizportal path to the SAME path on testportal, so the exact emailed assessment
+# links (e.g. /assessment/<token>) keep working — the token in the path is preserved.
+#
+# Do NOT put this in the testportal / main app folder — it belongs only in quizportal.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^(www\.)?quizportal\.mandi-hariyanna-academy\.com$ [NC]
+  RewriteRule ^(.*)$ https://testportal.mandi-hariyanna-academy.com/$1 [R=301,L]
+</IfModule>

@@ -1,0 +1,123 @@
+/* ===========================================================================
+   Public final-selection page. Celebratory but restrained — the company's own
+   brand colours (--brand / --brand-2) come from the API and do the talking.
+   =========================================================================== */
+
+.sel-page {
+  --ink:#141821;
+  --ink-2:#5A6373;
+  --ink-3:#8A93A3;
+  --surface:#FFFFFF;
+  --line:#E5E8EF;
+  min-height:100vh;
+  background:#F7F8FB;
+  color:var(--ink);
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  padding:0 20px 64px;
+  position:relative;
+  overflow-x:hidden;
+}
+
+/* Soft brand wash behind the header. */
+.sel-glow {
+  position:absolute; inset:0 0 auto 0; height:420px; pointer-events:none;
+  background:
+    radial-gradient(60% 120% at 50% -10%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 70%),
+    radial-gradient(40% 90% at 85% 0%, color-mix(in srgb, var(--brand-2) 18%, transparent), transparent 70%);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.sel-head { position:relative; max-width:860px; margin:0 auto; padding:56px 0 40px; text-align:center; }
+.sel-logo {
+  width:76px; height:76px; margin:0 auto 18px; border-radius:20px; overflow:hidden;
+  background:var(--surface); border:1px solid var(--line);
+  box-shadow:0 10px 30px rgba(20,24,33,.10);
+  display:flex; align-items:center; justify-content:center;
+  font-size:30px; font-weight:800; color:var(--brand);
+}
+.sel-logo img { width:100%; height:100%; object-fit:contain; padding:8px; }
+.sel-company { font-size:13px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); }
+.sel-drive { font-size:14px; color:var(--ink-2); margin-top:6px; }
+.sel-title {
+  font-size:clamp(2.2rem,7vw,3.6rem); line-height:1.05; letter-spacing:-.02em; margin:22px 0 0;
+  font-family:Georgia,"Times New Roman",serif; font-weight:600;
+  background:linear-gradient(100deg,var(--brand),var(--brand-2));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.sel-sub { font-size:16px; color:var(--ink-2); max-width:56ch; margin:14px auto 0; line-height:1.6; }
+.sel-sub strong { color:var(--ink); }
+
+/* ── Candidate cards ──────────────────────────────────────────────────────── */
+.sel-grid {
+  position:relative; max-width:1120px; margin:0 auto;
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(268px,1fr)); gap:18px;
+}
+.sel-card {
+  background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:22px;
+  box-shadow:0 1px 2px rgba(20,24,33,.04), 0 12px 30px -22px rgba(20,24,33,.5);
+  animation:sel-rise .5s both cubic-bezier(.2,.7,.3,1);
+  position:relative; overflow:hidden;
+}
+.sel-card::before {
+  content:""; position:absolute; inset:0 0 auto 0; height:3px;
+  background:linear-gradient(90deg,var(--brand),var(--brand-2));
+}
+.sel-card-top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+.sel-avatar {
+  width:46px; height:46px; border-radius:14px; flex-shrink:0;
+  background:linear-gradient(135deg,var(--brand),var(--brand-2)); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:19px; font-weight:800;
+}
+.sel-badge {
+  font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  padding:5px 10px; border-radius:999px;
+  background:color-mix(in srgb, var(--brand) 12%, transparent);
+  color:var(--brand); border:1px solid color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.sel-name { font-size:19px; font-weight:700; margin:0 0 12px; line-height:1.25; letter-spacing:-.01em; }
+.sel-meta { margin:0; display:flex; flex-direction:column; gap:8px; }
+.sel-meta > div { display:grid; grid-template-columns:74px 1fr; gap:10px; align-items:baseline; }
+.sel-meta dt { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3); font-weight:700; }
+.sel-meta dd { margin:0; font-size:13.5px; color:var(--ink); }
+
+@keyframes sel-rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+
+/* ── Footer + states ──────────────────────────────────────────────────────── */
+.sel-foot { max-width:860px; margin:56px auto 0; text-align:center; color:var(--ink-3); font-size:13px; }
+.sel-foot p { margin:4px 0; }
+.sel-foot a { color:var(--brand); text-decoration:none; }
+.sel-foot a:hover { text-decoration:underline; }
+
+.sel-state {
+  min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; padding:40px 24px; background:#F7F8FB; color:#141821;
+  font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+}
+.sel-state-icon { font-size:44px; margin-bottom:14px; }
+.sel-state h1 { font-size:22px; margin:0 0 10px; font-weight:700; }
+.sel-state p { color:#5A6373; max-width:46ch; margin:0; line-height:1.6; }
+.sel-spin {
+  width:30px; height:30px; border-radius:50%; margin-bottom:14px;
+  border:3px solid #E5E8EF; border-top-color:#4F46E5; animation:sel-spin .8s linear infinite;
+}
+@keyframes sel-spin { to { transform:rotate(360deg); } }
+
+/* ── Dark mode ────────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme:dark) {
+  .sel-page { --ink:#E7EAF0; --ink-2:#A8B0BE; --ink-3:#7C8595; --surface:#171B23; --line:#28303B; background:#0E1218; }
+  .sel-card { box-shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -22px rgba(0,0,0,.9); }
+  .sel-logo { box-shadow:0 10px 30px rgba(0,0,0,.5); }
+  .sel-state { background:#0E1218; color:#E7EAF0; }
+  .sel-state p { color:#A8B0BE; }
+  .sel-spin { border-color:#28303B; border-top-color:#8FAAE8; }
+}
+
+@media (max-width:600px) {
+  .sel-head { padding:40px 0 30px; }
+  .sel-grid { grid-template-columns:1fr; }
+  .sel-meta > div { grid-template-columns:68px 1fr; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .sel-card { animation:none; }
+  .sel-spin { animation-duration:2s; }
+}

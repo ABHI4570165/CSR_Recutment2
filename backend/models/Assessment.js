@@ -17,6 +17,18 @@ const sectionSchema = new mongoose.Schema({
 }, { _id: false });
 
 const assessmentSchema = new mongoose.Schema({
+  /* ── NEW ARCHITECTURE LINKS (all optional) ────────────────────────────────
+   * In the new flow an Assessment is the TEST that belongs to a Round:
+   *   Workspace → Drive → Round → Assessment(test) → attempt → result
+   * `isTest:true` marks it as round-owned so it NEVER appears in the drive list
+   * (the Drives page reads the `drives` collection). Legacy drives leave all of
+   * these unset and continue to behave exactly as before — no migration needed.
+   */
+  workspaceId: { type: mongoose.Schema.Types.ObjectId, ref: "Workspace", default: undefined, index: true },
+  driveId:     { type: mongoose.Schema.Types.ObjectId, ref: "Drive",     default: undefined, index: true },
+  roundId:     { type: mongoose.Schema.Types.ObjectId, ref: "Round",     default: undefined, index: true },
+  isTest:      { type: Boolean, default: false, index: true },
+
   name:             { type: String, required: true, trim: true },          // e.g. "Inference Labs Campus Drive 2026"
   description:      { type: String, trim: true, default: "" },
   durationMinutes:  { type: Number, default: 40, min: 1, max: 600 },

@@ -1,6 +1,10 @@
 const mongoose = require("mongoose");
 
 const questionSchema = new mongoose.Schema({
+  // Owning workspace (added with the multi-company architecture). Optional, so
+  // any question not yet linked keeps behaving exactly as before.
+  workspaceId:  { type: mongoose.Schema.Types.ObjectId, ref: "Workspace", default: undefined, index: true },
+
   text:         { type: String, required: true, trim: true },
   // Question type: "mcq" (4 options, one correct) or "text" (typed exact-output answer).
   type:         { type: String, enum: ["mcq", "text"], default: "mcq", index: true },
@@ -11,7 +15,13 @@ const questionSchema = new mongoose.Schema({
   correctIndex: { type: Number, min: 0, max: 3, default: null,
                   required: function () { return this.type === "mcq"; } },
   // Text-answer field — the expected exact typed answer (used when type === "text").
+  // For open-ended questions this holds the model answer / evaluator rubric: it is
+  // never sent to the candidate, and shows up beside the typed answer on review.
   answerText:   { type: String, default: null },
+  // Typed-answer questions only. false = short exact output (single-line input,
+  // auto-scored by exact match). true = essay/open-ended, so the exam renders a
+  // textarea and the answer is expected to be marked by hand.
+  longAnswer:   { type: Boolean, default: false },
   // Optional HTML shown ABOVE the question (e.g. SQL reference tables that every
   // question in a section shares). Rendered as-is in the exam UI.
   reference:    { type: String, default: null },

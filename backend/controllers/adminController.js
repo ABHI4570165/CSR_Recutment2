@@ -290,7 +290,9 @@ exports.getCutoffPreview = async (req, res) => {
     // Cutoff now runs against drive candidates (Candidate collection). Optionally
     // scope to one drive via ?assessmentId — recommended, since different drives
     // are different tests with different max marks.
-    const base = { status: "completed" };
+    // Cutoff runs inside the open workspace — see utils/legacyScope.
+    const { legacyScope } = require("../utils/legacyScope");
+    const base = { status: "completed", ...legacyScope(req) };
     if (req.query.assessmentId) base.assessmentId = req.query.assessmentId;
     const filter = { ...base, score: { $gte: cutoff } };
     const [cands, total, topDoc] = await Promise.all([

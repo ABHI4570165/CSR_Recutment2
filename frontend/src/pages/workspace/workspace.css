@@ -1,0 +1,203 @@
+/* ===========================================================================
+   Workspace / dynamic-round screens.
+   Only the pieces the existing design system does not already cover. Everything
+   uses the same CSS variables as AdminDashboard.css, so light + dark themes and
+   the responsive breakpoints come along for free.
+   =========================================================================== */
+
+/* ── Workspace switcher (top bar) ─────────────────────────────────────────── */
+.ws-switch { position:relative; }
+.ws-switch-btn {
+  display:flex; align-items:center; gap:10px; height:40px; padding:0 12px;
+  background:var(--surface-2); border:1.5px solid var(--border); border-radius:var(--r);
+  cursor:pointer; font-family:var(--font); color:var(--text-1); max-width:260px;
+  transition:border-color .12s, background .12s;
+}
+.ws-switch-btn:hover { border-color:var(--primary); }
+.ws-switch-btn:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+.ws-switch-logo {
+  width:26px; height:26px; border-radius:7px; flex-shrink:0; object-fit:cover;
+  background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:800;
+}
+.ws-switch-text { min-width:0; text-align:left; }
+.ws-switch-label { font-size:9.5px; letter-spacing:.9px; text-transform:uppercase; color:var(--text-3); font-weight:700; line-height:1.2; }
+.ws-switch-name  { font-size:13px; font-weight:700; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ws-switch-caret { color:var(--text-3); font-size:10px; flex-shrink:0; }
+
+.ws-menu {
+  position:absolute; top:calc(100% + 6px); right:0; min-width:280px; z-index:60;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg);
+  box-shadow:0 12px 32px rgba(15,15,40,.18); overflow:hidden; padding:6px;
+}
+.ws-menu-head { font-size:10px; letter-spacing:.9px; text-transform:uppercase; color:var(--text-3); font-weight:700; padding:8px 10px 6px; }
+.ws-menu-item {
+  display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border:none;
+  background:none; cursor:pointer; border-radius:var(--r); font-family:var(--font);
+  color:var(--text-1); font-size:13px; text-align:left;
+}
+.ws-menu-item:hover { background:var(--surface-2); }
+.ws-menu-item--active { background:var(--primary-lt); color:var(--primary); font-weight:700; }
+.ws-menu-item--new { border-top:1px solid var(--border); border-radius:0 0 var(--r) var(--r); margin-top:4px; color:var(--primary); font-weight:700; }
+.ws-menu-meta { margin-left:auto; font-size:11px; color:var(--text-3); }
+
+.ws-menu-item--overview { color:var(--primary); font-weight:700; border-bottom:1px solid var(--border); border-radius:var(--r) var(--r) 0 0; margin-bottom:4px; }
+
+/* ── LEVEL 1 · global overview ────────────────────────────────────────────── */
+.ws-hero { margin-bottom:22px; }
+.ws-hero-title {
+  font-family:var(--serif); font-size:clamp(1.5rem,3.4vw,2rem); font-weight:800;
+  color:var(--text-1); margin:0; letter-spacing:-.01em; line-height:1.2;
+}
+.ws-hero-sub { color:var(--text-3); font-size:14px; margin:6px 0 0; }
+
+.ws-global-stat {
+  display:inline-block; min-width:210px; background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); padding:16px 20px; box-shadow:var(--shadow-sm); margin-bottom:8px;
+}
+.ws-global-stat-label { font-size:11.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3); }
+.ws-global-stat-value { font-size:34px; font-weight:800; line-height:1.1; margin-top:6px; color:var(--text-1); font-variant-numeric:tabular-nums; }
+.ws-global-stat-sub { font-size:12px; color:var(--text-3); margin-top:4px; }
+
+.ws-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(288px,1fr)); gap:16px; }
+.ws-card {
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg);
+  padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column;
+  transition:border-color .14s, transform .14s, box-shadow .14s;
+}
+.ws-card:hover { border-color:var(--primary); transform:translateY(-2px); box-shadow:0 10px 26px -18px rgba(79,70,229,.6); }
+.ws-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.ws-card-logo {
+  width:44px; height:44px; border-radius:12px; overflow:hidden; flex-shrink:0;
+  background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:800;
+}
+.ws-card-logo img { width:100%; height:100%; object-fit:contain; background:#fff; padding:4px; }
+.ws-card-name { font-family:var(--serif); font-size:16.5px; font-weight:800; margin:0; color:var(--text-1); line-height:1.3; }
+.ws-card-company { font-size:12.5px; color:var(--text-3); margin-top:3px; }
+.ws-card-stats { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; font-size:13px; color:var(--text-2); }
+.ws-card-num { font-weight:800; color:var(--text-1); }
+.ws-card-dot { color:var(--border); }
+.ws-card-meta { font-size:11.5px; color:var(--text-3); margin-top:8px; }
+.ws-card-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+.ws-card-actions .ad-btn { flex:1; min-width:120px; justify-content:center; }
+
+/* ── Round tiles (Workspace → Rounds; no drive layer) ─────────────────────── */
+.ws-round-tile {
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg);
+  padding:18px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column;
+  transition:border-color .14s, transform .14s;
+}
+.ws-round-tile:hover { border-color:var(--primary); transform:translateY(-2px); }
+.ws-round-tile-top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.ws-round-tile-name { font-family:var(--serif); font-size:17px; font-weight:800; margin:0; color:var(--text-1); line-height:1.25; }
+.ws-round-tile-type { font-size:12.5px; color:var(--text-3); margin-top:4px; }
+.ws-round-tile-stats { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; font-size:13px; color:var(--text-2); }
+.ws-round-tile-gate {
+  margin-top:12px; padding:8px 10px; border-radius:var(--r); font-size:12px;
+  background:var(--surface-2); border:1px solid var(--border); color:var(--text-2);
+}
+
+/* ── LEVEL 2 · workspace header ───────────────────────────────────────────── */
+.ws-ws-head { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+.ws-ws-logo {
+  width:48px; height:48px; border-radius:14px; overflow:hidden; flex-shrink:0;
+  background:linear-gradient(135deg,#4F46E5,#7C3AED); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:800;
+}
+.ws-ws-logo img { width:100%; height:100%; object-fit:contain; background:#fff; padding:5px; }
+.ws-ws-name { font-family:var(--serif); font-size:20px; font-weight:800; color:var(--text-1); line-height:1.25; }
+.ws-ws-sub  { font-size:12.5px; color:var(--text-3); margin-top:2px; }
+
+/* ── Round builder ────────────────────────────────────────────────────────── */
+.ws-rounds { display:flex; flex-direction:column; gap:12px; }
+.ws-round-card {
+  border:1.5px solid var(--border); border-radius:var(--r-lg); background:var(--surface);
+  padding:14px 16px; position:relative;
+}
+.ws-round-card--locked { background:var(--surface-2); }
+.ws-round-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.ws-round-seq {
+  width:30px; height:30px; border-radius:9px; background:var(--primary-lt); color:var(--primary);
+  font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.ws-round-name { font-size:15px; font-weight:800; color:var(--text-1); font-family:var(--serif); }
+.ws-round-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.ws-round-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.ws-round-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:12px; }
+.ws-add-round {
+  display:flex; align-items:center; justify-content:center; gap:8px; width:100%;
+  padding:14px; border:2px dashed var(--border); border-radius:var(--r-lg); background:none;
+  color:var(--primary); font-weight:700; font-size:13.5px; cursor:pointer; font-family:var(--font);
+  transition:border-color .12s, background .12s;
+}
+.ws-add-round:hover { border-color:var(--primary); background:var(--primary-lt); }
+.ws-locked-note { font-size:12px; color:var(--text-3); margin-top:8px; display:flex; gap:6px; align-items:flex-start; }
+
+/* ── Recruitment journey ──────────────────────────────────────────────────── */
+.ws-journey { display:flex; flex-direction:column; gap:0; }
+.ws-jrow { display:grid; grid-template-columns:32px 1fr; gap:12px; }
+.ws-jrail { display:flex; flex-direction:column; align-items:center; }
+.ws-jdot {
+  width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:13px; font-weight:800; flex-shrink:0; border:2px solid;
+}
+.ws-jline { width:2px; flex:1; background:var(--border); min-height:14px; }
+.ws-jbody { padding-bottom:16px; min-width:0; }
+.ws-jhead { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.ws-jname { font-weight:800; font-size:14.5px; color:var(--text-1); }
+.ws-jseq  { font-size:11px; color:var(--text-3); font-weight:700; text-transform:uppercase; letter-spacing:.6px; }
+.ws-jstats { display:flex; flex-wrap:wrap; gap:14px; margin-top:6px; font-size:13px; color:var(--text-2); }
+.ws-jstat b { color:var(--text-1); }
+.ws-joverride { margin-top:8px; padding:8px 10px; border-radius:var(--r); background:var(--surface-2); border:1px solid var(--border); font-size:12px; color:var(--text-2); }
+
+/* ── Round stat strip ─────────────────────────────────────────────────────── */
+.ws-stat-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden; margin-bottom:16px; }
+.ws-stat { background:var(--surface); padding:12px 14px; }
+.ws-stat-val { font-size:20px; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
+.ws-stat-lbl { font-size:11px; color:var(--text-3); margin-top:4px; }
+
+/* ── Misc ─────────────────────────────────────────────────────────────────── */
+.ws-error { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; border-radius:var(--r); background:#FEF2F2; border:1px solid #FECACA; color:#991B1B; font-size:13px; margin-bottom:14px; }
+[data-theme="dark"] .ws-error { background:rgba(220,38,38,.12); border-color:rgba(220,38,38,.4); color:#FCA5A5; }
+
+.ws-toast { position:fixed; top:18px; right:18px; z-index:9999; max-width:360px; border-radius:12px; padding:12px 14px; cursor:pointer; box-shadow:0 10px 30px rgba(15,15,40,.18); }
+.ws-toast--success { background:#ECFDF5; border:1px solid #A7F3D0; color:#065F46; }
+.ws-toast--error   { background:#FEF2F2; border:1px solid #FECACA; color:#991B1B; }
+.ws-toast-title { font-weight:800; font-size:13px; }
+.ws-toast-line  { font-size:12px; margin-top:2px; }
+
+.ws-modal-foot { display:flex; gap:10px; justify-content:flex-end; padding:14px 20px; border-top:1px solid var(--border); flex-wrap:wrap; }
+.ws-form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+.ws-req { color:#DC2626; margin-left:2px; }
+.ws-hint { font-size:11.5px; color:var(--text-3); margin-top:4px; }
+.ws-sub-tabs { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px; border-bottom:1px solid var(--border); }
+.ws-sub-tab { padding:9px 14px; font-size:13px; font-weight:700; color:var(--text-3); background:none; border:none; border-bottom:2.5px solid transparent; cursor:pointer; font-family:var(--font); white-space:nowrap; }
+.ws-sub-tab:hover { color:var(--text-1); }
+.ws-sub-tab--active { color:var(--primary); border-bottom-color:var(--primary); }
+.ws-crumb { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-3); margin-bottom:12px; flex-wrap:wrap; }
+.ws-crumb button { background:none; border:none; color:var(--primary); font-weight:700; cursor:pointer; font-family:var(--font); font-size:12.5px; padding:0; }
+
+@media (max-width:640px) {
+  .ws-switch-btn { max-width:170px; }
+  .ws-menu { min-width:240px; right:-8px; }
+  .ws-round-actions { width:100%; }
+}
+
+/* ── AI report typography ─────────────────────────────────────────────────── */
+.rep-body { line-height:1.65; }
+.rep-h1 { font-family:var(--serif); font-size:22px; font-weight:800; margin:4px 0 14px; color:var(--text-1); }
+.rep-h2 { font-family:var(--serif); font-size:17px; font-weight:800; margin:22px 0 8px; color:var(--text-1);
+          border-bottom:1px solid var(--border); padding-bottom:6px; }
+.rep-h3 { font-size:14.5px; font-weight:800; margin:16px 0 6px; color:var(--text-2); }
+.rep-p  { font-size:14px; color:var(--text-2); margin:0 0 10px; }
+.rep-li { font-size:14px; color:var(--text-2); margin:0 0 5px 20px; }
+@media print {
+  .ad-tabs, .ad-topbar, .ws-sub-tabs, .ad-btn, .ws-crumb, .ad-status-widget,
+  .ws-stat-strip, .ad-toolbar { display:none !important; }
+  .ad-page, .ad-content, .rep-body { background:#fff !important; color:#000 !important;
+    border:none !important; box-shadow:none !important; padding:0 !important; margin:0 !important; max-width:none !important; }
+  .rep-h1,.rep-h2,.rep-h3 { color:#000 !important; page-break-after:avoid; }
+  .rep-p,.rep-li { color:#111 !important; }
+  @page { margin:16mm; }
+}

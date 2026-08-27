@@ -16,6 +16,8 @@ const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AssessmentPage = lazy(() => import("./pages/AssessmentPage"));
 const WalkInPortal   = lazy(() => import("./pages/WalkInPortal"));
 const LiveProctoring = lazy(() => import("./pages/LiveProctoring"));
+const SelectionPage  = lazy(() => import("./pages/SelectionPage"));
+const DriveRegisterPage = lazy(() => import("./pages/DriveRegisterPage"));
 const ErrorPage      = lazy(() => import("./pages/ErrorPage"));
 
 const Loading = () => (
@@ -34,6 +36,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path={`/${VIEWER_PATH}`} element={<AdminDashboard mode="viewer" />} />
           {/* Live proctoring (admin only — guarded by adminToken inside the page). */}
           <Route path={`/${ADMIN_PATH}/live`} element={<LiveProctoring />} />
+
+          {/* Workspace drive self-registration → first-round test. */}
+          <Route path="/register/:workspaceSlug/:driveSlug" element={<DriveRegisterPage />} />
+
+          {/* Public final-selection page (only visible once the admin publishes it). */}
+          <Route path="/selection/:workspaceSlug/:driveSlug" element={<SelectionPage />} />
 
           {/* Public candidate flows. */}
           <Route path="/test"               element={<WalkInPortal />} />

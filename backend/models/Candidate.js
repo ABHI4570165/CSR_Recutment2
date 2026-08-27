@@ -61,8 +61,72 @@ const violationsSchema = new mongoose.Schema({
   total:           { type: Number, default: 0 },
 }, { _id: false });
 
+// ── ROUND-STATUS / QUALIFICATION vocabulary (new architecture) ────────────────
+// Round-level status is SEPARATE from the legacy `status` pipeline below, which
+// the live quiz engine still owns. Nothing here replaces or rewrites it.
+const ROUND_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "QUALIFIED", "REJECTED", "NOT_ATTEMPTED"];
+const QUALIFICATIONS = ["PENDING", "QUALIFIED", "REJECTED", "HISTORICAL_NOT_DETERMINED"];
+
 const candidateSchema = new mongoose.Schema({
-  assessmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Assessment", required: true, index: true },
+  // The test this record belongs to.
+  //
+  // NOTE ON `required`: relaxed from required:true so that a NON-TEST round
+  // (interview / GD / HR) can hold a result without a question paper. Meaning is
+  // unchanged, every one of the existing records still carries it, and every
+  // existing writer still sets it — engine-backed rounds validate it in the
+  // controller. This is the ONLY constraint touched by the new architecture.
+  assessmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Assessment", required: false, index: true },
+
+  /* ── NEW ARCHITECTURE LINKS (all optional) ────────────────────────────────
+   * A record written by the NEW multi-workspace flow is a ROUND PARTICIPATION:
+   *   Workspace → Drive → Round → (this document) → Attempt/Result
+   * Legacy records simply do not carry these fields and keep working exactly as
+   * they always have. No migration is required for them to remain valid.
+   */
+  workspaceId:   { type: mongoose.Schema.Types.ObjectId, ref: "Workspace", default: undefined, index: true },
+  driveId:       { type: mongoose.Schema.Types.ObjectId, ref: "Drive",     default: undefined, index: true },
+  roundId:       { type: mongoose.Schema.Types.ObjectId, ref: "Round",     default: undefined, index: true },
+  applicationId: { type: mongoose.Schema.Types.ObjectId, ref: "CandidateApplication", default: undefined, index: true },
+  studentId:     { type: mongoose.Schema.Types.ObjectId, ref: "Student",   default: undefined, index: true },
+
+  // The candidate's result FOR THIS ROUND. `isPrimary` marks the counted
+  // attempt; a re-sit is stored alongside with isPrimary:false and never lost.
+  isPrimary:  { type: Boolean, default: undefined },
+  repeatOf:   { type: mongoose.Schema.Types.ObjectId, default: null },
+  roundStatus:{ type: String, enum: ROUND_STATUSES, default: undefined },
+
+  // Qualification decision — written by the round cutoff, never derived on read.
+  qualification:       { type: String, enum: QUALIFICATIONS, default: undefined },
+  qualificationSource: { type: String, enum: ["CUTOFF", "MANUAL_OVERRIDE", "NOT_STORED_IN_LEGACY_SYSTEM"], default: undefined },
+  cutoffAtDecision:    { type: Number, default: null },
+  decidedAt:           { type: Date },
+
+  // Manual override — the automatic decision is preserved in `from`.
+  override: {
+    from:   { type: String },
+    to:     { type: String },
+    by:     { type: String },
+    at:     { type: Date },
+    reason: { type: String },
+  },
+
+  // Who let this candidate into the round, and how.
+  assignedAt: { type: Date },
+  assignedBy: { type: String },
+
+  needsReview:  { type: Boolean, default: undefined },
+  reviewReason: { type: String },
+
+  // ── Recruitment round segregation (additive; Round 1 = Aptitude, 2 = Technical) ──
+  // `round` is denormalised from the parent Assessment.round so we can filter/aggregate
+  // candidates by round across ALL drives without a join. Backfilled by migration.
+  round:        { type: Number, default: undefined, index: true },
+  // Links the SAME person's separate per-round records into one recruitment journey
+  // (Round-1 and Round-2 are separate candidate docs). Set at move-to-technical time
+  // and backfilled by a reviewed identity match. Null = not yet linked.
+  masterId:     { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
+  // True once an Aptitude-SELECTED candidate has been advanced to the Technical round.
+  techEligible: { type: Boolean, default: false, index: true },
 
   // Identity (from CSV / Excel / manual entry, or walk-in registration form)
   name:    { type: String, required: true, trim: true },
@@ -184,8 +248,46 @@ candidateSchema.index({ emailStatus: 1, emailScheduledAt: 1 }); // link-email sc
 candidateSchema.index({ "shortlistEmail.status": 1, "shortlistEmail.scheduledAt": 1 }); // shortlist poll
 candidateSchema.index({ "completionEmail.status": 1, "completionEmail.scheduledAt": 1 }); // completion poll
 candidateSchema.index({ assessmentId: 1, email: 1 }, { unique: true }); // one invite per email per drive
+// Round-wise dashboards / summaries across ALL drives of a round.
+candidateSchema.index({ round: 1, status: 1 });
+candidateSchema.index({ round: 1, college: 1, status: 1 });
+candidateSchema.index({ round: 1, score: -1 });
+
+/* ── NEW ARCHITECTURE INDEXES ────────────────────────────────────────────────
+ * ONE participation per (application, round). The partial filter means the
+ * constraint applies ONLY to records written by the new flow (legacy records
+ * carry no isPrimary field and are therefore excluded), and a legitimate re-sit
+ * stored with isPrimary:false is never blocked.
+ */
+candidateSchema.index({ applicationId: 1, roundId: 1 },
+  { unique: true, partialFilterExpression: { isPrimary: true } });
+candidateSchema.index({ roundId: 1, roundStatus: 1 });
+candidateSchema.index({ roundId: 1, qualification: 1 });
+candidateSchema.index({ roundId: 1, score: -1 });
+candidateSchema.index({ workspaceId: 1, driveId: 1, createdAt: -1 });
 
 candidateSchema.statics.STATUSES = STATUSES;
 candidateSchema.statics.EMAIL_STATUSES = EMAIL_STATUSES;
+candidateSchema.statics.ROUND_STATUSES = ROUND_STATUSES;
+candidateSchema.statics.QUALIFICATIONS = QUALIFICATIONS;
+
+// ── Round metadata (Round 1 = Aptitude, Round 2 = Technical). Data model stays
+// numeric so more rounds can be added later; the UI shows these names. ─────────
+const ROUND_NAMES = { 1: "Aptitude", 2: "Technical Round" };
+candidateSchema.statics.ROUND_NAMES = ROUND_NAMES;
+candidateSchema.statics.roundName = (n) => ROUND_NAMES[Number(n)] || (n ? `Round ${n}` : "—");
+
+// Map the existing per-record `status` to the segregated round-status + overall-status
+// vocabulary the admin UI uses — WITHOUT changing the stored enum (backward safe).
+candidateSchema.statics.roundStatusOf = (status) => {
+  switch (status) {
+    case "invited": case "email-sent":            return "NOT_STARTED";
+    case "started": case "in-progress":           return "IN_PROGRESS";
+    case "completed":                             return "COMPLETED";
+    case "shortlisted":                           return "SELECTED";
+    case "rejected": case "disqualified":         return "REJECTED";
+    default:                                      return "NOT_STARTED";
+  }
+};
 
 module.exports = mongoose.model("Candidate", candidateSchema);

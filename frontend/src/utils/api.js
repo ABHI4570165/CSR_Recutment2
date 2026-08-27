@@ -56,6 +56,12 @@ adminApi.interceptors.request.use((cfg) => {
   if (!cfg.baseURL) cfg.baseURL = currentBase();
   const token = localStorage.getItem("adminToken");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  // The original admin screens (Campus Drives, Rounds, All Candidates,
+  // Questions, Cutoff) now open INSIDE a workspace, so they must say which
+  // workspace they are looking at — otherwise the backend scopes them to
+  // records that belong to no workspace and they come back empty.
+  const wsId = localStorage.getItem("mh_workspace");
+  if (wsId) cfg.headers["X-Workspace-Id"] = wsId;
   return cfg;
 });
 candApi.interceptors.request.use((cfg) => {
@@ -123,8 +129,25 @@ function withFailover(instance) {
     return handleErr(err);
   };
 }
+// A 401 on any admin endpoint means the stored adminToken is expired or was issued
+// by a DIFFERENT backend (each one signs with its own ADMIN_JWT_SECRET — e.g. a
+// token from the live site won't verify against a local backend). Every admin
+// loader swallows its errors, so without this the dashboard would render blank
+// forever with only console noise. Drop the dead session and go back to login.
+// The login call itself is exempt — a 401 there is just wrong credentials.
+let adminReauthing = false;
+const adminAuthGuard = (err) => {
+  const url = err?.config?.url || "";
+  if (err?.response?.status === 401 && !url.includes("/auth/admin/login") && !adminReauthing) {
+    adminReauthing = true;                       // in-flight siblings 401 too — reload once
+    clearAdminToken();
+    window.location.reload();                    // AdminDashboard sees no token → LoginScreen
+  }
+  return withFailover(adminApi)(err);
+};
+
 api.interceptors.response.use((r) => r, withFailover(api));
-adminApi.interceptors.response.use((r) => r, withFailover(adminApi));
+adminApi.interceptors.response.use((r) => r, adminAuthGuard);
 candApi.interceptors.response.use((r) => r, withFailover(candApi));
 
 // ── Student APIs ──────────────────────────────────────────────────────────────
@@ -169,6 +192,19 @@ export const getSystemStatus = ()    => adminApi.get("/system/status");
 export const setActiveMode   = (d)   => adminApi.post("/system/active-mode", d);
 export const sendHeartbeat   = ()    => adminApi.post("/system/heartbeat");
 
+// Warm EVERY backend directly (bypasses the sticky load-balancer, which would
+// otherwise only ping the one instance this browser picked). This keeps all 6
+// Render instances awake — INCLUDING the live-proctoring signaling server —
+// while Active Mode is on. Fire-and-forget; no-cors so CORS never blocks it.
+export const BACKEND_COUNT = BACKENDS.length;
+export function warmAllBackends() {
+  return Promise.allSettled(
+    BACKENDS.map((b) =>
+      fetch(`${b}/health`, { mode: "no-cors", cache: "no-store", keepalive: true }).catch(() => {})
+    )
+  );
+}
+
 // ── Question APIs ─────────────────────────────────────────────────────────────
 export const fetchQuestions = (p)    => adminApi.get("/questions",        { params: p });
 export const addQuestion    = (d)    => adminApi.post("/questions", d);
@@ -193,6 +229,10 @@ export const fetchCandidateAnswers = (id)   => adminApi.get(`/assessments/candid
 export const terminateCandidate    = (id, reason) => adminApi.post(`/assessments/candidates/${id}/terminate`, { reason });
 export const refreshTestCode       = (id) => adminApi.post(`/assessments/${id}/refresh-code`);
 export const downloadResumeFile   = (id)    => adminApi.get(`/assessments/candidates/${id}/resume?download=1`, { responseType: "blob" });
+// ── Round segregation (Aptitude / Technical) ──
+export const fetchRoundSummary    = ()      => adminApi.get("/assessments/rounds/summary");
+export const fetchCandidateJourney = (id)   => adminApi.get(`/assessments/candidates/${id}/journey`);
+export const moveToTechnical      = (candidateIds) => adminApi.post("/assessments/rounds/move-to-technical", { candidateIds });
 
 // ── Campus Recruitment — Candidate (public, token in URL) ──────────────────────
 // No auth header — the opaque token IS the credential. (candApi defined above, with failover.)
