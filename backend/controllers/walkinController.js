@@ -188,6 +188,11 @@ exports.registerWalkIn = async (req, res) => {
     try {
       const token = await generateUniqueToken(Candidate);
       const cand = await Candidate.create({
+        // Same scope inheritance as the admin upload — a walk-in registered into
+        // a workspace drive must belong to that workspace, or it never shows up.
+        ...(drive.workspaceId ? { workspaceId: drive.workspaceId } : {}),
+        ...(drive.driveId     ? { driveId: drive.driveId }         : {}),
+        ...(drive.roundId     ? { roundId: drive.roundId }         : {}),
         assessmentId: drive._id,
         name, email, college,
         candidateSource: "WALK_IN",

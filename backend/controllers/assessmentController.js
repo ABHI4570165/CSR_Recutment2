@@ -295,6 +295,14 @@ exports.uploadCandidates = async (req, res) => {
 
       const token = await generateUniqueToken(Candidate);
       const doc = await Candidate.create({
+        // Inherit the drive's scope. Without workspaceId the candidate is
+        // invisible to listCandidates, which scopes by the X-Workspace-Id
+        // header — the row is created and then cannot be found. Taking it from
+        // the assessment (rather than the request) keeps it correct on the
+        // public walk-in route too, which carries no admin header.
+        ...(assessment.workspaceId ? { workspaceId: assessment.workspaceId } : {}),
+        ...(assessment.driveId     ? { driveId: assessment.driveId }         : {}),
+        ...(assessment.roundId     ? { roundId: assessment.roundId }         : {}),
         assessmentId, name, email, college, token,
         tokenExpiresAt: expiry || undefined,
         status: "invited",
