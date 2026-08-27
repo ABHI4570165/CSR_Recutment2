@@ -42,30 +42,44 @@ const ALLOWED_ORIGINS = [
 const ALLOWED_BARE = ALLOWED_ORIGINS.map(bare);
 console.log("[CORS] Allowed origins:", ALLOWED_ORIGINS);
 
+// Per-request decision logging. Always on outside production; in production set
+// CORS_DEBUG=true to turn it on temporarily while diagnosing a blocked domain.
+// Logs the ORIGIN ONLY — never headers, tokens, cookies or request bodies.
+const CORS_DEBUG = process.env.CORS_DEBUG === "true" || process.env.NODE_ENV !== "production";
+const corsLog = (origin, allowed, why) => {
+  if (!allowed) {
+    console.warn(`[CORS] Request origin: ${origin || "(none)"} | Allowed: false (${why}) | Allow-list: ${ALLOWED_ORIGINS.join(", ")}`);
+  } else if (CORS_DEBUG) {
+    console.log(`[CORS] Request origin: ${origin || "(none)"} | Allowed: true (${why})`);
+  }
+};
+
 const corsOptions = {
   origin: (origin, cb) => {
     // Allow no-origin requests (curl, Render health pings, same-origin)
-    if (!origin) return cb(null, true);
+    if (!origin) { corsLog(origin, true, "no Origin header"); return cb(null, true); }
 
     // Always allow localhost / 127.0.0.1 on ANY port — local dev (Vite may pick
     // 5173, 5174, 5175… if a port is taken). A browser only sends a localhost
     // origin from the same machine, so this is safe even in production.
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return cb(null, true);
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+      corsLog(origin, true, "localhost"); return cb(null, true);
+    }
 
     // Always allow in development
-    if (process.env.NODE_ENV !== "production") return cb(null, true);
+    if (process.env.NODE_ENV !== "production") { corsLog(origin, true, "non-production"); return cb(null, true); }
 
     const norm = bare(origin); // compare ignoring www. on both sides
     const allowed = ALLOWED_BARE.some(
       (o) => norm === o || norm.startsWith(o + "/")
     );
 
-    if (allowed) return cb(null, true);
+    if (allowed) { corsLog(origin, true, "in allow-list"); return cb(null, true); }
 
     // cb(null, false) omits the CORS headers so the browser still blocks the
     // request — but the response stays a clean 204/4xx instead of a 500 thrown
     // through Express, which made this look like a server crash in the logs.
-    console.warn(`[CORS] BLOCKED: "${origin}" not in allowed list: ${ALLOWED_ORIGINS.join(", ")}`);
+    corsLog(origin, false, "not in allow-list");
     return cb(null, false);
   },
   credentials:    true,
