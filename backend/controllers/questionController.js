@@ -1,4 +1,5 @@
 const Question  = require("../models/Question");
+const Assessment = require("../models/Assessment");
 const { refreshCache } = require("./quizController");
 const { legacyScope } = require("../utils/legacyScope");
 
@@ -56,6 +57,56 @@ const PAPER_GROUPS = [
 
 const prettySection = (k) => SECTION_LABELS[k]
   || String(k).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/*
+ * Everything the question bank ACTUALLY holds for this workspace: which rounds
+ * exist, which sets, which sections and how many questions in each.
+ *
+ * The admin screens used to render these filters from hard-coded lists, so one
+ * workspace showed another workspace's sections (at count 0) and offered sets it
+ * had never seeded. Deriving them here means a workspace shows only its own.
+ *
+ * Display names come from the workspace's own data first: the name the admin
+ * typed for that section when configuring a drive (Assessment.sections[].
+ * displayName). Only if a section has never been named does it fall back to the
+ * built-in label, then to a prettified key.
+ */
+async function bankForScope(scope) {
+  const rows = await Question.aggregate([
+    { $match: scope },
+    { $group: {
+        _id: { round: { $ifNull: ["$round", 1] }, set: "$set", section: "$section" },
+        count: { $sum: 1 },
+    } },
+    { $sort: { "_id.round": 1, "_id.set": 1, "_id.section": 1 } },
+  ]);
+
+  // Admin-typed section names, newest drive wins.
+  const named = {};
+  const drives = await Assessment.find(scope.workspaceId ? { workspaceId: scope.workspaceId } : { workspaceId: { $exists: false } })
+    .select("sections createdAt").sort({ createdAt: 1 }).lean();
+  drives.forEach((d) => (d.sections || []).forEach((s) => {
+    if (s?.name && s?.displayName) named[s.name] = s.displayName;
+  }));
+  const label = (k) => named[k] || prettySection(k);
+
+  const byRound = new Map();
+  rows.forEach((r) => {
+    const rd = r._id.round;
+    if (!byRound.has(rd)) byRound.set(rd, { round: rd, total: 0, sets: new Map(), sections: new Map() });
+    const b = byRound.get(rd);
+    b.total += r.count;
+    if (r._id.set) b.sets.set(r._id.set, (b.sets.get(r._id.set) || 0) + r.count);
+    b.sections.set(r._id.section, (b.sections.get(r._id.section) || 0) + r.count);
+  });
+
+  return [...byRound.values()].map((b) => ({
+    round: b.round,
+    total: b.total,
+    sets: [...b.sets.entries()].map(([name, count]) => ({ name, count })).sort((x, y) => x.name.localeCompare(y.name)),
+    sections: [...b.sections.entries()].map(([name, count]) => ({ name, displayName: label(name), count })),
+  })).sort((a, b) => a.round - b.round);
+}
 
 exports.getQuestionCatalog = async (req, res) => {
   try {
@@ -122,7 +173,11 @@ exports.getQuestionCatalog = async (req, res) => {
               + (p.manualCount ? ` · ${p.manualCount} marked by hand` : " · auto-scored");
     });
 
-    res.json({ success: true, data: { round, papers, sets: Object.keys(bySet).sort() } });
+    // What this workspace's bank actually holds — drives the admin filters so a
+    // workspace never shows another one's rounds, sets or sections.
+    const bank = await bankForScope(legacyScope(req));
+
+    res.json({ success: true, data: { round, papers, sets: Object.keys(bySet).sort(), bank } });
   } catch (err) {
     console.error("getQuestionCatalog error:", err);
     res.status(500).json({ success: false, message: "Failed to load the question catalogue." });

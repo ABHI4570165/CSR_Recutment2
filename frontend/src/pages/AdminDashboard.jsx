@@ -58,19 +58,6 @@ function sectionColor(sec, idx) {
 
 const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
-// Round-2 technical section options (for the section dropdown when editing/creating).
-const TECH_SECTION_OPTS = [
-  { name:"t_sec_a", displayName:"[R2] Section A — MCQs" },
-  { name:"t_sec_b", displayName:"[R2] Section B — Python / Output" },
-  { name:"t_sec_c", displayName:"[R2] Section C — Advanced / SQL" },
-  { name:"t_sec_d", displayName:"[R2] Section D — DSA" },
-  // Trainer bank (set T) — its own section keys so it never mixes with sets A–D.
-  { name:"tr_sec_a", displayName:"[Trainer] Section A — Data Analytics MCQs" },
-  { name:"tr_sec_b", displayName:"[Trainer] Section B — Data Science / ML MCQs" },
-  { name:"tr_sec_c", displayName:"[Trainer] Section C — Application-Level" },
-  { name:"tr_sec_d", displayName:"[Trainer] Section D — Output Prediction" },
-  { name:"tr_sec_e", displayName:"[Trainer] Section E — Scenario-Based" },
-];
 // Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced),
 // Trainer = the DS/DA trainer screening bank (single set T, so every candidate gets it).
 const ROUND2_VERSIONS = {
@@ -82,7 +69,7 @@ const ROUND2_VERSIONS = {
 const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B", T:"T2" };
 
 // ── Question Form (MCQ or typed-answer) ───────────────────────────────────────
-function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
+function QuestionForm({ initial, onSave, onCancel, saving, sections, bank = [] }) {
   const [text,   setText]   = useState(initial?.text||"");
   const [type,   setType]   = useState(initial?.type||"mcq");
   const [opts,   setOpts]   = useState(initial?.options||["","","",""]);
@@ -95,9 +82,15 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
   const [set,    setSet]    = useState(initial?.set||"");
   const [err,    setErr]    = useState("");
 
-  // Section options: round-1 pool + the round-2 tech sections + the question's own section.
-  const secOpts=[...sections.map(s=>({name:s.name,displayName:s.displayName})),...TECH_SECTION_OPTS];
+  // Section options come from the round-1 pool plus every section this workspace
+  // already uses (from the bank), so another workspace's sections never appear.
+  // A brand-new section can still be typed in the field beside the dropdown.
+  const secOpts=[...sections.map(s=>({name:s.name,displayName:s.displayName}))];
+  bank.flatMap(b=>b.sections).forEach(x=>{ if(!secOpts.some(o=>o.name===x.name)) secOpts.push({name:x.name,displayName:x.displayName}); });
   if(initial?.section && !secOpts.some(s=>s.name===initial.section)) secOpts.push({name:initial.section,displayName:initial.section});
+  // Sets this workspace actually has, for the round being edited.
+  const availableSets=Object.values(bank.filter(b=>String(b.round)===String(round)).flatMap(b=>b.sets)
+    .reduce((m,x)=>{ (m[x.name] ||= {...x}); return m; },{}));
 
   const save = () => {
     if(!text.trim())          { setErr("Question text is required."); return; }
@@ -137,25 +130,20 @@ function QuestionForm({ initial, onSave, onCancel, saving, sections }) {
             onChange={e=>setMarks(e.target.value)} style={{height:38}}/>
           <label className="ad-label" style={{marginTop:6}}>Round</label>
           <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))}>
-            <option value={1}>Round 1 (Aptitude pool)</option>
-            <option value={2}>Round 2 (Technical)</option>
+            {/* 1 = drawn from the section pool, 2 = drawn from a fixed set.
+                Labelled by what this workspace actually holds, not by a fixed name. */}
+            <option value={1}>Round 1 — section pool{bank.find(b=>b.round===1)?` (${bank.find(b=>b.round===1).total} questions)`:""}</option>
+            <option value={2}>Round 2 — fixed sets{bank.find(b=>b.round===2)?` (${bank.find(b=>b.round===2).total} questions)`:""}</option>
           </select>
           {Number(round)===2 && (<>
             <label className="ad-label" style={{marginTop:6}}>Version · Set</label>
             <select className="ad-input ad-select" value={set} onChange={e=>setSet(e.target.value)}>
               <option value="">Select set…</option>
-              <optgroup label="Version A (Aptitude)">
-                <option value="A">Set A</option>
-                <option value="B">Set B</option>
-              </optgroup>
-              <optgroup label="Version B (Advanced)">
-                <option value="C">Set C</option>
-                <option value="D">Set D</option>
-              </optgroup>
-              <optgroup label="Trainer (DS/DA)">
-                <option value="T">Set T</option>
-              </optgroup>
+              {availableSets.map(x=><option key={x.name} value={x.name}>Set {x.name} ({x.count})</option>)}
+              {set && !availableSets.some(x=>x.name===set) && <option value={set}>Set {set}</option>}
             </select>
+            <input className="ad-input" style={{marginTop:6}} value={set} placeholder="…or type a new set key, e.g. E"
+                   onChange={e=>setSet(e.target.value.trim().toUpperCase())}/>
           </>)}
         </div>
       </div>
@@ -2533,6 +2521,16 @@ function Dashboard({ onLogout }) {
   const [qSection,   setQSection]  = useState("");
   const [qRound,     setQRound]    = useState("");
   const [qSet,       setQSet]      = useState("");
+  // What THIS workspace's question bank actually contains. Replaces the
+  // hard-coded round/set/section lists, which showed every workspace the same
+  // options regardless of what it had.
+  const [bank,       setBank]      = useState([]);
+  // Sets/sections for the chosen round, or merged across all rounds when the
+  // round filter is "All". Merging by key keeps a section that appears in two
+  // rounds from being listed twice.
+  const bankRows   = qRound ? bank.filter(b=>String(b.round)===String(qRound)) : bank;
+  const bankSets   = Object.values(bankRows.flatMap(b=>b.sets).reduce((m,x)=>{ (m[x.name] ||= {...x, count:0}).count += x.count; return m; },{}));
+  const bankSections = Object.values(bankRows.flatMap(b=>b.sections).reduce((m,x)=>{ (m[x.name] ||= {...x, count:0}).count += x.count; return m; },{}));
   const [showAddQ,   setShowAddQ]  = useState(false);
   const [editQ,      setEditQ]     = useState(null);
   const [qSaving,    setQSaving]   = useState(false);
@@ -2588,6 +2586,12 @@ function Dashboard({ onLogout }) {
   useEffect(()=>{ if(tab==="students")  loadUsers(); },[userPage,userSearch,userStatus,userMin]);
   useEffect(()=>{ if(tab==="attempts")  loadAttempts(); },[attPage,attSearch,attStatus,attPassed]);
   useEffect(()=>{ if(tab==="questions") loadQuestions(); },[qSection,qRound,qSet]);
+  // Reloaded whenever the bank could have changed (add/edit/delete a question),
+  // so the counts and the section list stay honest.
+  const loadBank=useCallback(async()=>{
+    try{ const r=await fetchQuestionCatalog(); setBank(r?.data?.data?.bank||[]); }catch{ setBank([]); }
+  },[]);
+  useEffect(()=>{ if(tab==="questions") loadBank(); },[tab,questions.length,loadBank]);
 
   const handleAddQ  = async(d)=>{ setQSaving(true);try{await addQuestion(d);await loadQuestions();setShowAddQ(false);}catch(e){alert(e.message);}finally{setQSaving(false);} };
   const handleEditQ = async(d)=>{ setQSaving(true);try{await updateQuestion(editQ._id,d);await loadQuestions();setEditQ(null);}catch(e){alert(e.message);}finally{setQSaving(false);} };
@@ -2778,58 +2782,62 @@ function Dashboard({ onLogout }) {
               <div className="ad-page-title">Questions ({questions.length})</div>
               {!showAddQ&&!editQ&&<button className="ad-btn ad-btn--primary" onClick={()=>setShowAddQ(true)}>+ Add Question</button>}
             </div>
+            {/* Every filter below is built from THIS workspace's own question bank
+                (GET /questions/catalog → bank). Nothing is hard-coded, so a
+                workspace never shows another one's rounds, sets or sections, and
+                the section name shown is the name the admin gave it. */}
             <div className="ad-toolbar">
-              <select className="ad-select" value={qRound} onChange={e=>{setQRound(e.target.value);setQSection("");if(e.target.value!=="2")setQSet("");}}>
-                <option value="">All Rounds</option>
-                <option value="1">Round 1 (Aptitude pool)</option>
-                <option value="2">Round 2 (Technical)</option>
-              </select>
-              {qRound==="2" && (
-                <select className="ad-select" value={qSet} onChange={e=>setQSet(e.target.value)}>
-                  <option value="">All Versions / Sets</option>
-                  <optgroup label="Version A (Aptitude)">
-                    <option value="A">Set A</option>
-                    <option value="B">Set B</option>
-                  </optgroup>
-                  <optgroup label="Version B (Advanced)">
-                    <option value="C">Set C</option>
-                    <option value="D">Set D</option>
-                  </optgroup>
-                  <optgroup label="Trainer (DS/DA)">
-                    <option value="T">Set T</option>
-                  </optgroup>
+              {bank.length===0 ? (
+                <span className="ad-hint">No questions in this workspace yet — add one to start building the bank.</span>
+              ) : (<>
+                <select className="ad-select" value={qRound} onChange={e=>{setQRound(e.target.value);setQSection("");setQSet("");}}>
+                  <option value="">All Rounds</option>
+                  {bank.map(b=>(
+                    <option key={b.round} value={String(b.round)}>
+                      Round {b.round}{b.sets.length?` — Sets ${b.sets.map(x=>x.name).join("/")}`:""} ({b.total})
+                    </option>
+                  ))}
                 </select>
-              )}
-              <select className="ad-select" value={qSection} onChange={e=>setQSection(e.target.value)}>
-                <option value="">All Sections</option>
-                {(qRound==="2"?TECH_SECTION_OPTS:allSections).map(s=><option key={s.name} value={s.name}>{s.displayName}</option>)}
-              </select>
-              <div className="ad-q-counts">
-                {(qRound==="2"?TECH_SECTION_OPTS:allSections).map((s,i)=>(
-                  <span key={s.name} className="ad-q-count-pill" style={{background:sectionColor(s,i)+"22",color:sectionColor(s,i),border:`1px solid ${sectionColor(s,i)}44`}}>
-                    {s.displayName}: {questions.filter(q=>q.section===s.name).length}
-                  </span>
-                ))}
-              </div>
+                {bankSets.length>0 && (
+                  <select className="ad-select" value={qSet} onChange={e=>setQSet(e.target.value)}>
+                    <option value="">All Sets</option>
+                    {bankSets.map(x=><option key={x.name} value={x.name}>Set {x.name} ({x.count})</option>)}
+                  </select>
+                )}
+                {bankSections.length>0 && (
+                  <select className="ad-select" value={qSection} onChange={e=>setQSection(e.target.value)}>
+                    <option value="">All Sections</option>
+                    {bankSections.map(s=><option key={s.name} value={s.name}>{s.displayName}</option>)}
+                  </select>
+                )}
+                <div className="ad-q-counts">
+                  {bankSections.map((s,i)=>(
+                    <span key={s.name} className="ad-q-count-pill" style={{background:sectionColor(s,i)+"22",color:sectionColor(s,i),border:`1px solid ${sectionColor(s,i)}44`}}>
+                      {s.displayName}: {s.count}
+                    </span>
+                  ))}
+                </div>
+              </>)}
             </div>
-            {showAddQ&&<div style={{marginBottom:16}}><QuestionForm sections={allSections} onSave={handleAddQ} onCancel={()=>setShowAddQ(false)} saving={qSaving}/></div>}
+            {showAddQ&&<div style={{marginBottom:16}}><QuestionForm sections={allSections} bank={bank} onSave={handleAddQ} onCancel={()=>setShowAddQ(false)} saving={qSaving}/></div>}
             {questions.length===0&&!showAddQ&&<div className="ad-empty">No questions yet. Click "Add Question" to start.</div>}
             <div className="ad-q-list">
               {questions.map((q,i)=>(
                 <div key={q._id}>
                   {editQ?._id===q._id
-                    ?<div style={{marginBottom:12}}><QuestionForm sections={allSections} initial={q} onSave={handleEditQ} onCancel={()=>setEditQ(null)} saving={qSaving}/></div>
+                    ?<div style={{marginBottom:12}}><QuestionForm sections={allSections} bank={bank} initial={q} onSave={handleEditQ} onCancel={()=>setEditQ(null)} saving={qSaving}/></div>
                     :<div className="ad-q-card">
                       <div className="ad-q-card-head">
                         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",flex:1}}>
                           <span className="ad-q-num">Q{i+1}</span>
                           {(() => {
+                            const bankSec = bank.flatMap(b=>b.sections).find(s=>s.name===q.section);
                             const si = allSections.findIndex(s=>s.name===q.section);
                             const clr = sectionColor(allSections[si]||{},si);
-                            // Round-2 sections aren't in the round-1 pool, so fall back to
-                            // the tech/trainer section labels before showing the raw key.
-                            const lbl = allSections.find(s=>s.name===q.section)?.displayName
-                                     || TECH_SECTION_OPTS.find(s=>s.name===q.section)?.displayName
+                            // The bank carries the name this workspace gave the section,
+                            // so it wins over the round-1 pool and the built-in labels.
+                            const lbl = bankSec?.displayName
+                                     || allSections.find(s=>s.name===q.section)?.displayName
                                      || q.section;
                             return <span className="ad-q-sec-pill" style={{background:clr+"22",color:clr}}>{lbl}</span>;
                           })()}
