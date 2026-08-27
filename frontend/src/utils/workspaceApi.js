@@ -162,3 +162,22 @@ export const submitRegistration = (wsSlug, driveSlug, answers) =>
   unwrap(ws.post(`/public/register/${wsSlug}/${driveSlug}`, answers, { noWorkspace: true, headers: {} }));
 
 export default ws;
+
+/* ── Round emails ─────────────────────────────────────────────────────────────
+ * Two separate concepts, mirroring the backend:
+ *   templates — the content, reusable across events
+ *   workflow  — which template fires on which event, and whether it is on
+ * The trigger list and the {{placeholders}} come from /meta, so the UI never
+ * hard-codes either.
+ */
+export const fetchEmailMeta      = ()      => ws.get("/email-templates/meta");
+export const fetchEmailTemplates = (roundId) => ws.get("/email-templates", { params: { roundId } });
+export const createEmailTemplate = (d)     => ws.post("/email-templates", d);
+export const updateEmailTemplate = (id, d) => ws.put(`/email-templates/${id}`, d);
+export const deleteEmailTemplate = (id)    => ws.delete(`/email-templates/${id}`);
+export const previewEmail        = (d)     => ws.post("/email-templates/preview", d);
+export const testSendEmail       = (d)     => ws.post("/email-templates/test-send", d);
+export const fetchEmailWorkflow  = (roundId) => ws.get("/email-templates/workflow", { params: { roundId } });
+export const setEmailWorkflow    = (d)     => ws.put("/email-templates/workflow", d);
+export const clearEmailWorkflow  = (id)    => ws.delete(`/email-templates/workflow/${id}`);
+export const sendManualEmail     = (d)     => ws.post("/email-templates/send", d);

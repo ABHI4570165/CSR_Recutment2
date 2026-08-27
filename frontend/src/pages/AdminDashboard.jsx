@@ -13,6 +13,7 @@ import {
 import "./AdminDashboard.css";
 // Multi-workspace recruitment module (additive — the legacy screens below are untouched).
 import WorkspaceModule, { WorkspaceProvider, WorkspaceSwitcherSlot, useWorkspace } from "./workspace/WorkspaceModule";
+import RoundEmails from "./workspace/RoundEmails";
 import RoundsPage from "./workspace/RoundsPage";
 import RoundPanel from "./workspace/RoundPanel";
 
@@ -2539,6 +2540,9 @@ function WorkspaceRoundDrives({ readOnly }) {
         <button className={`ws-sub-tab ${sub==="drives"?"ws-sub-tab--active":""}`} onClick={()=>setSub("drives")}>
           🎓 Drives
         </button>
+        <button className={`ws-sub-tab ${sub==="emails"?"ws-sub-tab--active":""}`} onClick={()=>setSub("emails")}>
+          📧 Emails
+        </button>
       </div>
 
       {/* Cutoff, preview/apply, advance-to-next-round and this round's student
@@ -2562,6 +2566,10 @@ function WorkspaceRoundDrives({ readOnly }) {
                      lockedRoundName={openRound.name} lockedDriveId={openRound.driveId} readOnly={readOnly}/>
         </div>
       )}
+
+      {/* Which email goes out at each stage of THIS round, and the HTML behind
+          each one. A round that configures nothing keeps the built-in emails. */}
+      {sub==="emails" && <RoundEmails round={openRound} readOnly={readOnly}/>}
     </div>
   );
 }
