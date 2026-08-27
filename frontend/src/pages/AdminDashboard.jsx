@@ -831,10 +831,17 @@ const WALKIN_FIELD_OPTS = [
   ["gender","Gender"], ["dob","Date of Birth"], ["aadhaar","Aadhaar"], ["location","Location"],
 ];
 
-function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose, onCreated }) {
+function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedRoundId = null, lockedDriveId = null, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
   const [round,setRound]=useState(lockedRound ? Number(lockedRound) : 1);
+  // WHERE the questions come from, which is independent of WHICH round this is.
+  // Round 2 used to imply "fixed set" purely because it was the only round that
+  // had one — that broke any round numbered 3 or higher, which silently fell
+  // back to the section pool and could never use a set. `useSets` makes the
+  // choice explicit and available in every round; the pool remains the default
+  // for round 1 so existing behaviour is unchanged.
+  const [useSets,setUseSets]=useState(Number(lockedRound || 1) === 2);
   const [round2Paper,setRound2Paper]=useState("B");   // default to Version B (Sets C&D · 40 Q); A = Sets A&B · 30 Q
   const [walkInFields,setWalkInFields]=useState([]);  // extra registration fields to collect (round 2 walk-in)
   const [maxCandidates,setMaxCandidates]=useState("");
@@ -875,14 +882,14 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
     const collegesArr=collegesText.split("\n").map(s=>s.trim()).filter(Boolean);
-    if(driveType==="WALK_IN" && round!==2 && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
-    // Round 2 uses the sections of the chosen set-paper; Round 1 uses the chosen pool sections.
+    if(driveType==="WALK_IN" && !useSets && !collegesArr.length){ setErr("Add at least one college (one per line) for the walk-in dropdown."); return; }
+    // A fixed set supplies its own sections; the pool uses the ticked sections.
     const paper = paperMap[round2Paper] || Object.values(paperMap)[0];
-    if(round===2 && !paper){ setErr("No Round-2 question set is available. Seed questions first."); return; }
-    const chosen = round===2
+    if(useSets && !paper){ setErr("No question set is available. Seed questions first."); return; }
+    const chosen = useSets
       ? paper.sections
       : secs.filter(s=>s.include).map(({name,displayName,questionCount,color})=>({name,displayName,questionCount:Number(questionCount)||1,color}));
-    if(round!==2 && !chosen.length){ setErr("Select at least one section."); return; }
+    if(!useSets && !chosen.length){ setErr("Select at least one section."); return; }
     if(!date){ setErr("Assessment date is required."); return; }
     const startAt=combineDateTime(date,startTime);
     const endAt=combineDateTime(date,endTime);
@@ -892,9 +899,16 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
     setSaving(true); setErr("");
     try{
       await createAssessment({
-        name:name.trim(), driveType, round, durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
-        ...(round===2 ? { round2Sets: paper.sets } : {}),
-        ...(round===2 && walkInFields.length ? { walkInFields } : {}),
+        name:name.trim(), driveType,
+        // `round` on the Assessment is the QUESTION POOL, not the sequence:
+        // 2 = draw from a fixed set, 1 = draw from the section pool. The round a
+        // drive belongs to is carried by roundId, so any sequence works.
+        round: useSets ? 2 : 1,
+        ...(lockedRoundId ? { roundId: lockedRoundId } : {}),
+        ...(lockedDriveId ? { driveId: lockedDriveId } : {}),
+        durationMinutes:Number(duration)||40, passingScore:Number(passing)||0, sections:chosen,
+        ...(useSets ? { round2Sets: paper.sets } : {}),
+        ...(useSets && walkInFields.length ? { walkInFields } : {}),
         assessmentDate:combineDateTime(date,"00:00"), startAt, endAt,
         deadline:endAt, // link expiry defaults to the window end
         linkSendOption,
@@ -951,12 +965,12 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
               <div className="ad-field"><label className="ad-label">Passing Score (internal)</label>
                 <input type="number" className="ad-input" value={passing} min={0} onChange={e=>setPassing(e.target.value)}/></div>
             </div>
-            {driveType==="WALK_IN" && round!==2 && (
+            {driveType==="WALK_IN" && !useSets && (
               <div className="ad-field" style={{marginTop:12}}><label className="ad-label">Colleges — one per line (students pick from this dropdown)</label>
                 <textarea className="ad-input ad-textarea" rows={4} value={collegesText} placeholder={"RV College of Engineering\nBMS College of Engineering\nPES University"} onChange={e=>setCollegesText(e.target.value)}/>
                 <span className="ad-hint">Candidates can only select from these — they can't type their own college.</span></div>
             )}
-            {driveType==="WALK_IN" && round===2 && (
+            {driveType==="WALK_IN" && useSets && (
               <div className="ad-note" style={{marginTop:12,fontSize:12.5}}>ℹ️ Round 2 collects only Name, Email &amp; Mobile — no college list needed.</div>
             )}
           </section>
@@ -987,7 +1001,16 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, onClose
 
           <section className="ad-card-section">
             <div className="ad-card-section-title">❓ Question Configuration</div>
-            {round===2 ? (<>
+            {/* Available in EVERY round. Previously this was implied by "round 2",
+                which left rounds numbered 3+ unable to use a question set. */}
+            <div className="ad-field" style={{marginBottom:12}}>
+              <label className="ad-label">Where do the questions come from?</label>
+              <select className="ad-input ad-select" value={useSets?"sets":"pool"} onChange={e=>setUseSets(e.target.value==="sets")}>
+                <option value="pool">Section pool — pick sections and question counts</option>
+                <option value="sets">Fixed question set — a prepared paper (Sets A–D, Trainer…)</option>
+              </select>
+            </div>
+            {useSets ? (<>
               <div className="ad-field">
                 <label className="ad-label">Question Version for this drive</label>
                 <select className="ad-input ad-select" value={round2Paper} onChange={e=>setRound2Paper(e.target.value)}>
@@ -1263,7 +1286,7 @@ function UploadModal({ assessment, onClose, onDone }) {
   );
 }
 
-function DrivesTab({ wsRounds = null, lockedRound = null }) {
+function DrivesTab({ wsRounds = null, lockedRound = null, lockedRoundId = null, lockedDriveId = null }) {
   // wsRounds  — the OPEN WORKSPACE's rounds ({sequence,name}). When supplied the
   //             round tabs below are generated from them instead of the two
   //             hard-coded legacy labels, so a workspace with 5 rounds shows 5.
@@ -1454,7 +1477,7 @@ function DrivesTab({ wsRounds = null, lockedRound = null }) {
   if(!sel) return (
     <div>
       {toastEl}{confirmEl}
-      {showCreate && <CreateDriveModal sections={sections} rounds={wsRounds} lockedRound={lockedRound || roundFilter} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
+      {showCreate && <CreateDriveModal sections={sections} rounds={wsRounds} lockedRound={lockedRound || roundFilter} lockedRoundId={lockedRoundId} lockedDriveId={lockedDriveId} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
@@ -1484,7 +1507,12 @@ function DrivesTab({ wsRounds = null, lockedRound = null }) {
         ))}
       </div>
       {(()=>{ const filtered=drives.filter(d=>{
-          const inRound=(Number(d.round)||1)===Number(roundFilter);
+          // Inside a round, membership is the round's ID — NOT d.round, which is
+          // the question pool (1 or 2) and can never equal a sequence of 3+.
+          // Legacy drives predate roundId, so they still fall back to the pool.
+          const inRound = lockedRoundId
+            ? (d.roundId ? String(d.roundId)===String(lockedRoundId) : (Number(d.round)||1)===Number(roundFilter))
+            : (Number(d.round)||1)===Number(roundFilter);
           const inStatus=driveFilter==="all"?true:driveFilter==="archived"?d.status==="ARCHIVED":d.status!=="ARCHIVED";
           return inRound && inStatus;
         });
@@ -2459,7 +2487,8 @@ function WorkspaceRoundDrives({ readOnly }) {
             Drives belonging to <strong>{openRound.name}</strong> only. Creating a drive here
             attaches it to Round {openRound.sequence}.
           </div>
-          <DrivesTab lockedRound={openRound.sequence} readOnly={readOnly}/>
+          <DrivesTab lockedRound={openRound.sequence} lockedRoundId={openRound._id}
+                     lockedDriveId={openRound.driveId} readOnly={readOnly}/>
         </div>
       )}
     </div>

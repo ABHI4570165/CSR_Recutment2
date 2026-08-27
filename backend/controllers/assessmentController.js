@@ -80,7 +80,22 @@ exports.createAssessment = async (req, res) => {
     const driveType = b.driveType === "WALK_IN" ? "WALK_IN" : "PRE_REGISTERED";
     // Walk-in drives get a unique global test code.
     const testCode = driveType === "WALK_IN" ? await nextTestCode() : undefined;
+    // A drive created while a workspace is open MUST be stamped with it. Without
+    // this the new drive has no workspaceId, and listAssessments — which scopes
+    // by the X-Workspace-Id header — cannot return it: the drive is created
+    // successfully and then vanishes from the list that just created it.
+    // driveId/roundId do the same for a drive created from inside a round, so it
+    // can be listed by the round it belongs to rather than by question pool.
+    const scope = legacyScope(req);
+    const wsId = scope.workspaceId instanceof mongoose.Types.ObjectId ? scope.workspaceId : null;
+    const linkId = (v) => (v && mongoose.isValidObjectId(v) ? new mongoose.Types.ObjectId(v) : null);
+    const driveId = linkId(b.driveId);
+    const roundId = linkId(b.roundId);
+
     const doc = await Assessment.create({
+      ...(wsId    ? { workspaceId: wsId }    : {}),
+      ...(driveId ? { driveId }              : {}),
+      ...(roundId ? { roundId }              : {}),
       name: String(name).trim(),
       description: description || "",
       durationMinutes: parseInt(durationMinutes) || 40,
