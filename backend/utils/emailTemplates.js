@@ -85,9 +85,15 @@ async function resolve(roundId, trigger) {
 }
 
 // Build the {{...}} values from the records the send path already has.
+// Times are stored in UTC. Formatting them without an explicit zone uses the
+// SERVER's zone, which is UTC on Render — so a 10:00 am start rendered as
+// "4:30 am" and a date stored at 18:30 UTC rendered as the PREVIOUS DAY. The
+// built-in emails always pinned this zone; the template renderer did not.
+const TZ = process.env.DISPLAY_TIMEZONE || "Asia/Kolkata";
+
 function varsFor({ candidate = {}, assessment = {}, round = {}, link = "", brand = "" } = {}) {
-  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "");
-  const fmtTime = (d) => (d ? new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }) : "");
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: TZ }) : "");
+  const fmtTime = (d) => (d ? new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }) : "");
   return {
     name:      candidate.name || "Candidate",
     email:     candidate.email || "",
