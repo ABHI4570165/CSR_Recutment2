@@ -210,6 +210,12 @@ export const fetchQuestions = (p)    => adminApi.get("/questions",        { para
 // Round-2 paper catalogue, derived from the questions in the DB. Seeding a new
 // set is enough for it to appear in the drive-creation dropdown.
 export const fetchQuestionCatalog = (p) => adminApi.get("/questions/catalog", { params: p });
+// Named question papers. The name is the admin's own text and is what every
+// paper dropdown shows; the key stays fixed so renaming never breaks a drive.
+export const fetchPapers  = ()      => adminApi.get("/questions/papers");
+export const createPaper  = (d)     => adminApi.post("/questions/papers", d);
+export const updatePaper  = (id, d) => adminApi.put(`/questions/papers/${id}`, d);
+export const deletePaper  = (id)    => adminApi.delete(`/questions/papers/${id}`);
 export const addQuestion    = (d)    => adminApi.post("/questions", d);
 export const updateQuestion = (id,d) => adminApi.put(`/questions/${id}`, d);
 export const deleteQuestion = (id)   => adminApi.delete(`/questions/${id}`);

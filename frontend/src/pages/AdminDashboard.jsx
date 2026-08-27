@@ -58,16 +58,110 @@ function sectionColor(sec, idx) {
 
 const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
-// Round-2 versions: Version A = Sets A & B (aptitude), Version B = Sets C & D (advanced),
-// Trainer = the DS/DA trainer screening bank (single set T, so every candidate gets it).
-const ROUND2_VERSIONS = {
-  A:  { label:"Version A — Aptitude · Set A & B · 30 Q · 30 marks (1 each)",                        sets:["A","B"] },
-  B:  { label:"Version B — Advanced Python/SQL/DSA · Set C & D · 40 Q · 40 marks (1 each)",         sets:["C","D"] },
-  T1: { label:"Trainer (DS/DA) — MCQ Screening · Set T · 24 Q · fully auto-scored",                 sets:["T"] },
-  T2: { label:"Trainer (DS/DA) — Full Bank A–E · Set T · 54 Q · Sections C/D/E reviewed by hand",   sets:["T"] },
-};
-const SET_TO_VERSION = { A:"A", B:"A", C:"B", D:"B", T:"T2" };
 
+/* ── Question Papers ──────────────────────────────────────────────────────────
+ * A paper is a NAMED selection of question sets, stored in the database. The
+ * name is the admin's own text and is what the drive-creation dropdown shows.
+ * The key is never edited: drives store it, so renaming leaves them attached.
+ */
+function PaperManager({ bank, onChanged }) {
+  const [papers,setPapers]=useState([]);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState("");
+  const [editing,setEditing]=useState(null);   // paper _id being renamed
+  const [draft,setDraft]=useState("");
+  const [adding,setAdding]=useState(false);
+  const [newName,setNewName]=useState(""); const [newSets,setNewSets]=useState([]);
+
+  const allSets=Object.values(bank.flatMap(b=>b.sets).reduce((m,x)=>{ (m[x.name] ||= {...x}); return m; },{}));
+
+  const load=useCallback(async()=>{
+    try{ const r=await fetchPapers(); setPapers(r.data.data||[]); }catch{ setPapers([]); }
+  },[]);
+  useEffect(()=>{ load(); },[load]);
+
+  const run=async(fn)=>{
+    setBusy(true); setErr("");
+    try{ await fn(); await load(); onChanged?.(); }
+    catch(e){ setErr(e?.response?.data?.message || e.message || "Something went wrong."); }
+    finally{ setBusy(false); }
+  };
+
+  return (
+    <div className="ad-card-section" style={{marginBottom:16}}>
+      <div className="ad-card-section-title" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span>Question Papers ({papers.length})</span>
+        {!adding && <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>{setAdding(true);setNewName("");setNewSets([]);setErr("");}}>+ New Paper</button>}
+      </div>
+      <span className="ad-hint" style={{display:"block",marginBottom:10}}>
+        The name you give a paper is exactly what appears in the drive's question-paper dropdown. Renaming is safe — existing drives stay attached.
+      </span>
+
+      {adding && (
+        <div className="ad-qform" style={{marginBottom:12}}>
+          <div className="ad-field">
+            <label className="ad-label">Paper Name</label>
+            <input className="ad-input" value={newName} autoFocus placeholder="e.g. DS Trainer Screening 2026"
+                   onChange={e=>{setNewName(e.target.value);setErr("");}}/>
+          </div>
+          <div className="ad-field" style={{marginTop:8}}>
+            <label className="ad-label">Question sets it draws from</label>
+            {allSets.length===0
+              ? <span className="ad-hint">No question sets in this workspace yet — add questions with a Set first.</span>
+              : <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {allSets.map(x=>{ const on=newSets.includes(x.name); return (
+                    <label key={x.name} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,background:on?"#e0e7ff":"#f1f5f9",border:"1px solid "+(on?"#818cf8":"#e2e8f0"),borderRadius:8,padding:"6px 10px",cursor:"pointer"}}>
+                      <input type="checkbox" checked={on} onChange={e=>setNewSets(prev=>e.target.checked?[...prev,x.name]:prev.filter(y=>y!==x.name))}/>
+                      Set {x.name} ({x.count})
+                    </label>
+                  );})}
+                </div>}
+            <span className="ad-hint">Two or more sets alternate between candidates.</span>
+          </div>
+          {err && <p className="ad-form-err">{err}</p>}
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            <button className="ad-btn ad-btn--primary" disabled={busy}
+              onClick={()=>run(async()=>{ await createPaper({name:newName,sets:newSets}); setAdding(false); })}>
+              {busy?<><Spinner/>Saving…</>:"Create Paper"}
+            </button>
+            <button className="ad-btn ad-btn--outline" onClick={()=>{setAdding(false);setErr("");}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {papers.length===0 && !adding && <div className="ad-empty">No papers yet — one is created automatically for each question set in this workspace.</div>}
+
+      {papers.map(p=>(
+        <div key={p._id} className="ad-q-card" style={{marginBottom:8}}>
+          <div className="ad-q-card-head">
+            {editing===p._id ? (
+              <div style={{display:"flex",gap:8,flex:1,alignItems:"center",flexWrap:"wrap"}}>
+                <input className="ad-input" style={{flex:1,minWidth:220}} value={draft} autoFocus
+                       onChange={e=>{setDraft(e.target.value);setErr("");}}
+                       onKeyDown={e=>{ if(e.key==="Enter") run(async()=>{ await updatePaper(p._id,{name:draft}); setEditing(null); }); }}/>
+                <button className="ad-btn ad-btn--sm ad-btn--primary" disabled={busy}
+                  onClick={()=>run(async()=>{ await updatePaper(p._id,{name:draft}); setEditing(null); })}>Save</button>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>{setEditing(null);setErr("");}}>Cancel</button>
+              </div>
+            ) : (<>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",flex:1}}>
+                <span className="ad-q-text" style={{fontWeight:700}}>{p.name}</span>
+                <span className="ad-badge ad-badge--blue">Set {p.sets.join(" & ")}</span>
+                {p.sections && p.sections.length>0 && <span className="ad-badge ad-badge--gray">{p.sections.length} section{p.sections.length===1?"":"s"}</span>}
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="ad-btn ad-btn--sm ad-btn--outline" onClick={()=>{setEditing(p._id);setDraft(p.name);setErr("");}}>Rename</button>
+                <button className="ad-btn ad-btn--sm ad-btn--danger" disabled={busy}
+                  onClick={()=>run(async()=>{ await deletePaper(p._id); })}>Delete</button>
+              </div>
+            </>)}
+          </div>
+        </div>
+      ))}
+      {err && !editing && !adding && <p className="ad-form-err">{err}</p>}
+    </div>
+  );
+}
 // ── Question Form (MCQ or typed-answer) ───────────────────────────────────────
 function QuestionForm({ initial, onSave, onCancel, saving, sections, bank = [] }) {
   const [text,   setText]   = useState(initial?.text||"");
@@ -776,42 +870,6 @@ function combineDateTime(dateStr, timeStr) {
 
 function toLocalInput(d){ if(!d) return ""; const dt=new Date(d); const p=n=>String(n).padStart(2,"0"); return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`; }
 
-// Round 2 = fed Technical sets A/B. Fixed section structure (questions live in the DB,
-// tagged round:2/set — editable in the Questions tab). One set per candidate, alternating.
-const ROUND2_SECTIONS = [
-  { name:"t_sec_a", displayName:"Section A — Tricky Concept MCQs",          questionCount:10, color:"#4F46E5" },
-  { name:"t_sec_b", displayName:"Section B — Predict the Output",           questionCount:10, color:"#7C3AED" },
-  { name:"t_sec_c", displayName:"Section C — Predict the Output: Advanced", questionCount:10, color:"#0891B2" },
-];
-// Sets C/D — advanced 4-section paper (MCQ, Python, SQL with reference tables, DSA).
-const ROUND2_SECTIONS_CD = [
-  { name:"t_sec_a", displayName:"Section A — Logic & Technical MCQs",     questionCount:10, color:"#4F46E5" },
-  { name:"t_sec_b", displayName:"Section B — Python Output Prediction",   questionCount:10, color:"#7C3AED" },
-  { name:"t_sec_c", displayName:"Section C — SQL Output Prediction",      questionCount:10, color:"#0891B2" },
-  { name:"t_sec_d", displayName:"Section D — Data Structures & Algorithms", questionCount:10, color:"#059669" },
-];
-// Set T — DS/DA Trainer Technical Screening bank (seeded by scripts/seedTrainerSet.js).
-// Two paper layouts over the SAME set: the MCQ-only screen, and the full A–E bank.
-const TRAINER_SECTIONS_MCQ = [
-  { name:"tr_sec_a", displayName:"Section A — Data Analytics MCQs (SQL, Statistics, BI)", questionCount:12, color:"#4F46E5" },
-  { name:"tr_sec_b", displayName:"Section B — Data Science / Machine Learning MCQs",      questionCount:12, color:"#7C3AED" },
-];
-const TRAINER_SECTIONS_FULL = [
-  ...TRAINER_SECTIONS_MCQ,
-  { name:"tr_sec_c", displayName:"Section C — Application-Level Questions",               questionCount:10, color:"#0891B2" },
-  { name:"tr_sec_d", displayName:"Section D — Output Prediction (Python / Pandas / SQL)", questionCount:10, color:"#059669" },
-  { name:"tr_sec_e", displayName:"Section E — Scenario-Based Questions",                  questionCount:10, color:"#D97706" },
-];
-// FALLBACK ONLY. The real list comes from GET /questions/catalog, which derives
-// it from the questions actually in the DB — so seeding a new set is enough to
-// make it selectable, with no frontend change. These hard-coded papers are used
-// only if that request fails (offline / older backend).
-const ROUND2_PAPERS = {
-  A:  { label:ROUND2_VERSIONS.A.label,  sets:["A","B"], sections:ROUND2_SECTIONS },
-  B:  { label:ROUND2_VERSIONS.B.label,  sets:["C","D"], sections:ROUND2_SECTIONS_CD },
-  T1: { label:ROUND2_VERSIONS.T1.label, sets:["T"],     sections:TRAINER_SECTIONS_MCQ },
-  T2: { label:ROUND2_VERSIONS.T2.label, sets:["T"],     sections:TRAINER_SECTIONS_FULL },
-};
 // Extra fields an admin can choose to collect at Round-2 walk-in registration
 // (beyond the always-on Name / Email / Mobile).
 const WALKIN_FIELD_OPTS = [
@@ -845,8 +903,9 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
   const [secConfig,setSecConfig]=useState({...DEFAULT_SEC_CONFIG});
   const [collegesText,setCollegesText]=useState("");
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
-  // Papers come from the backend (derived from the seeded questions). The
-  // hard-coded ROUND2_PAPERS are only a fallback if that call fails.
+  // Papers come from the database, named by the admin. There is deliberately no
+  // built-in fallback list: showing an invented paper name would be worse than
+  // saying plainly that the list could not be loaded.
   const [papers,setPapers]=useState(null);
   const [papersErr,setPapersErr]=useState("");
   const [poolSize,setPoolSize]=useState(null);   // round-1 pool size in THIS workspace
@@ -874,11 +933,11 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
         setRound2Paper(prev=>map[prev]?prev:list[0].key);   // keep the choice if it still exists
         if(!poolCount) setUseSets(true);                    // nothing else to draw from
       })
-      .catch(()=>{ if(alive) setPapersErr("Could not load question sets from the server — showing the built-in list."); });
+      .catch(()=>{ if(alive) setPapersErr("Could not load the question papers from the server. Check the connection and reopen this dialog."); });
     return ()=>{ alive=false; };
   },[]);
 
-  const paperMap = papers || ROUND2_PAPERS;
+  const paperMap = papers || {};
 
   const save=async()=>{
     if(!name.trim()){ setErr("Drive name is required."); return; }
@@ -1026,7 +1085,7 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
               <div className="ad-field">
                 <label className="ad-label">Question Version for this drive</label>
                 <select className="ad-input ad-select" value={round2Paper} onChange={e=>setRound2Paper(e.target.value)}>
-                  {Object.entries(paperMap).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  {Object.entries(paperMap).map(([k,v])=><option key={k} value={k}>{v.label||v.name}</option>)}
                 </select>
                 <span className="ad-hint">Version A = Set A &amp; Set B · Version B = Set C &amp; Set D — each candidate gets ONE set, alternating between students. The two <strong>Trainer (DS/DA)</strong> versions both use Set T, so every candidate sits the same paper.</span>
               </div>
@@ -2843,6 +2902,7 @@ function Dashboard({ onLogout }) {
                 </div>
               </>)}
             </div>
+            {!isViewer() && <PaperManager bank={bank} onChanged={loadBank}/>}
             {showAddQ&&<div style={{marginBottom:16}}><QuestionForm sections={allSections} bank={bank} onSave={handleAddQ} onCancel={()=>setShowAddQ(false)} saving={qSaving}/></div>}
             {questions.length===0&&!showAddQ&&<div className="ad-empty">No questions yet. Click "Add Question" to start.</div>}
             <div className="ad-q-list">

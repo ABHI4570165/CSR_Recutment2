@@ -1,5 +1,7 @@
+const mongoose  = require("mongoose");
 const Question  = require("../models/Question");
 const Assessment = require("../models/Assessment");
+const QuestionPaper = require("../models/QuestionPaper");
 const { refreshCache } = require("./quizController");
 const { legacyScope } = require("../utils/legacyScope");
 
@@ -46,13 +48,15 @@ const SECTION_LABELS = {
 };
 const SECTION_COLORS = ["#4F46E5", "#7C3AED", "#0891B2", "#059669", "#D97706", "#DB2777"];
 
-// A paper = the sets a candidate is drawn from (alternating) + optionally a
-// subset of that set's sections. `key` is what the Assessment stores.
-const PAPER_GROUPS = [
-  { key: "A",  label: "Version A — Aptitude",                    sets: ["A", "B"] },
-  { key: "B",  label: "Version B — Advanced Python/SQL/DSA",     sets: ["C", "D"] },
-  { key: "T1", label: "Trainer (DS/DA) — MCQ Screening",         sets: ["T"], only: ["tr_sec_a", "tr_sec_b"] },
-  { key: "T2", label: "Trainer (DS/DA) — Full Bank A–E",         sets: ["T"] },
+// Papers now live in the QuestionPaper collection, named by the admin. These are
+// used ONLY to seed a workspace that has none yet, so the sets it already holds
+// are immediately selectable under a sensible name it can then rename. Nothing
+// reads these once a workspace has its own papers.
+const DEFAULT_PAPERS = [
+  { key: "A",  name: "Version A — Aptitude",                sets: ["A", "B"] },
+  { key: "B",  name: "Version B — Advanced Python/SQL/DSA", sets: ["C", "D"] },
+  { key: "T1", name: "Trainer (DS/DA) — MCQ Screening",     sets: ["T"], sections: ["tr_sec_a", "tr_sec_b"] },
+  { key: "T2", name: "Trainer (DS/DA) — Full Bank A–E",     sets: ["T"] },
 ];
 
 const prettySection = (k) => SECTION_LABELS[k]
@@ -150,26 +154,52 @@ exports.getQuestionCatalog = async (req, res) => {
       }));
     };
 
+    // Papers are DEFINED IN THE DATABASE and named by the admin. A workspace
+    // with none yet is seeded on first read from DEFAULT_PAPERS (only for the
+    // sets it actually holds), so a freshly seeded set is selectable at once and
+    // can then be renamed — renaming never breaks a drive, which stores `key`.
+    const scope = legacyScope(req);
+    let defs = await QuestionPaper.find(scope).sort({ order: 1, createdAt: 1 }).lean();
+    if (!defs.length && Object.keys(bySet).length) {
+      const seed = DEFAULT_PAPERS
+        .filter((d) => d.sets.some((st) => bySet[st]?.length))
+        .map((d, i) => ({
+          ...(scope.workspaceId instanceof mongoose.Types.ObjectId ? { workspaceId: scope.workspaceId } : {}),
+          key: d.key, name: d.name, order: i,
+          sets: d.sets.filter((st) => bySet[st]?.length),
+          sections: d.sections || [],
+        }));
+      // Any set no default covers still becomes a paper of its own.
+      Object.keys(bySet).sort().forEach((st) => {
+        if (seed.some((d) => d.sets.includes(st))) return;
+        seed.push({
+          ...(scope.workspaceId instanceof mongoose.Types.ObjectId ? { workspaceId: scope.workspaceId } : {}),
+          key: `SET_${st}`, name: `Set ${st}`, sets: [st], sections: [], order: seed.length,
+        });
+      });
+      if (seed.length) {
+        try { await QuestionPaper.insertMany(seed, { ordered: false }); } catch { /* raced with another request */ }
+        defs = await QuestionPaper.find(scope).sort({ order: 1, createdAt: 1 }).lean();
+      }
+    }
+
     const papers = [];
-    const grouped = new Set();
-    PAPER_GROUPS.forEach((g) => {
-      const live = g.sets.filter((st) => bySet[st]?.length);
-      if (!live.length) return;                   // nothing seeded for this paper yet
-      live.forEach((st) => grouped.add(st));
-      papers.push({ key: g.key, label: g.label, sets: live, sections: sectionsFor(live, g.only) });
-    });
-    // Sets nobody grouped — surfaced automatically so seeding is enough.
-    Object.keys(bySet).sort().forEach((st) => {
-      if (grouped.has(st)) return;
-      papers.push({ key: `SET_${st}`, label: `Set ${st}`, sets: [st], sections: sectionsFor([st]) });
+    defs.forEach((d) => {
+      const live = (d.sets || []).filter((st) => bySet[st]?.length);
+      if (!live.length) return;                  // its sets have no questions yet
+      const only = (d.sections || []).length ? d.sections : null;
+      const secs = sectionsFor(live, only);
+      if (!secs.length) return;
+      papers.push({ id: String(d._id), key: d.key, name: d.name, sets: live, sections: secs });
     });
 
-    // Totals are per-candidate: one set's worth of questions.
+    // Totals are per-candidate: one set's worth of questions. `name` stays the
+    // admin's own text; `label` is name + the derived counts for the dropdown.
     papers.forEach((p) => {
       p.questionCount = p.sections.reduce((a, s) => a + s.questionCount, 0);
       p.marks         = p.sections.reduce((a, s) => a + s.marks, 0);
       p.manualCount   = p.sections.reduce((a, s) => a + s.longAnswer, 0);
-      p.label = `${p.label} · Set ${p.sets.join(" & ")} · ${p.questionCount} Q · ${p.marks} marks`
+      p.label = `${p.name} · Set ${p.sets.join(" & ")} · ${p.questionCount} Q · ${p.marks} marks`
               + (p.manualCount ? ` · ${p.manualCount} marked by hand` : " · auto-scored");
     });
 
@@ -242,5 +272,90 @@ exports.deleteQuestion = async (req, res) => {
   } catch (err) {
     console.error("deleteQuestion error:", err);
     res.status(500).json({ success: false, message: "Failed to delete question." });
+  }
+};
+
+/* ── Question papers (named, admin-editable) ──────────────────────────────────
+ * A paper's NAME is the admin's own text and is what every dropdown shows.
+ * `key` is the stable id an Assessment stores, so renaming a paper never
+ * detaches a drive that already points at it — which is exactly why rename does
+ * not touch the key.
+ */
+exports.listPapers = async (req, res) => {
+  try {
+    const papers = await QuestionPaper.find(legacyScope(req)).sort({ order: 1, createdAt: 1 }).lean();
+    res.json({ success: true, data: papers });
+  } catch (err) {
+    console.error("listPapers error:", err);
+    res.status(500).json({ success: false, message: "Failed to load question papers." });
+  }
+};
+
+exports.createPaper = async (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = String(b.name || "").trim();
+    const sets = Array.isArray(b.sets) ? b.sets.map((s) => String(s).trim().toUpperCase()).filter(Boolean) : [];
+    if (!name)       return res.status(400).json({ success: false, message: "Give the paper a name." });
+    if (!sets.length) return res.status(400).json({ success: false, message: "Choose at least one question set." });
+
+    const scope = legacyScope(req);
+    const wsId = scope.workspaceId instanceof mongoose.Types.ObjectId ? scope.workspaceId : null;
+    // A key the admin never sees; derived from the name, kept unique per workspace.
+    const base = (String(b.key || name).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "PAPER").slice(0, 32);
+    let key = base;
+    for (let i = 2; await QuestionPaper.exists({ ...scope, key }); i++) key = `${base}_${i}`;
+
+    const count = await QuestionPaper.countDocuments(scope);
+    const doc = await QuestionPaper.create({
+      ...(wsId ? { workspaceId: wsId } : {}),
+      key, name, sets,
+      sections: Array.isArray(b.sections) ? b.sections.map((x) => String(x).trim()).filter(Boolean) : [],
+      order: count,
+    });
+    res.status(201).json({ success: true, data: doc });
+  } catch (err) {
+    console.error("createPaper error:", err);
+    res.status(500).json({ success: false, message: "Failed to create the question paper." });
+  }
+};
+
+exports.updatePaper = async (req, res) => {
+  try {
+    const b = req.body || {};
+    const update = {};
+    if (b.name != null) {
+      const name = String(b.name).trim();
+      if (!name) return res.status(400).json({ success: false, message: "Give the paper a name." });
+      update.name = name;
+    }
+    if (Array.isArray(b.sets)) {
+      const sets = b.sets.map((s) => String(s).trim().toUpperCase()).filter(Boolean);
+      if (!sets.length) return res.status(400).json({ success: false, message: "Choose at least one question set." });
+      update.sets = sets;
+    }
+    if (Array.isArray(b.sections)) update.sections = b.sections.map((x) => String(x).trim()).filter(Boolean);
+    if (b.order != null) update.order = Number(b.order) || 0;
+    // `key` is deliberately NOT updatable: drives store it.
+
+    const doc = await QuestionPaper.findOneAndUpdate(
+      { _id: req.params.id, ...legacyScope(req) }, { $set: update }, { new: true, runValidators: true });
+    if (!doc) return res.status(404).json({ success: false, message: "Question paper not found." });
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    console.error("updatePaper error:", err);
+    res.status(500).json({ success: false, message: "Failed to update the question paper." });
+  }
+};
+
+exports.deletePaper = async (req, res) => {
+  try {
+    const doc = await QuestionPaper.findOneAndDelete({ _id: req.params.id, ...legacyScope(req) });
+    if (!doc) return res.status(404).json({ success: false, message: "Question paper not found." });
+    // Questions are untouched — a paper is only a named view over them.
+    res.json({ success: true, data: { deleted: doc.key } });
+  } catch (err) {
+    console.error("deletePaper error:", err);
+    res.status(500).json({ success: false, message: "Failed to delete the question paper." });
   }
 };
