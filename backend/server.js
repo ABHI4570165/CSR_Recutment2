@@ -20,7 +20,19 @@ app.set("trust proxy", 1);
 // express.json() CANNOT run before CORS — a blocked preflight returns no body,
 // which is why req.body appears empty and "All fields are required" fires.
 
-const normalise = (u) => (u || "").replace(/\/+$/, "").toLowerCase().trim();
+// Order matters. The previous version stripped trailing slashes BEFORE trimming,
+// so a value ending "…com/ " (slash then space) kept its slash and never matched.
+// Dashboard-entered env vars also arrive with stray quotes, spaces, CR (from
+// pasted multi-line values) and occasionally a zero-width char from a copy-paste,
+// none of which are visible when eyeballing the Render UI.
+const normalise = (u) =>
+  String(u || "")
+    .replace(/[​-‍﻿]/g, "")   // zero-width / BOM from copy-paste
+    .trim()
+    .replace(/^["']|["']$/g, "")             // surrounding quotes Render keeps verbatim
+    .trim()
+    .replace(/\/+$/, "")                     // trailing slash(es) — AFTER trimming
+    .toLowerCase();
 // Collapse "www." so https://www.site.com and https://site.com are treated as the SAME origin.
 const bare = (u) => normalise(u).replace(/^(https?:\/\/)www\./, "$1");
 
@@ -90,6 +102,22 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Workspace-Id"],
   exposedHeaders: ["Content-Length"],
 };
+
+// Proof that the preflight reaches Express at all. If this line is absent from
+// the Render logs while the browser still reports a CORS failure, the request is
+// being answered before it ever gets here (edge/proxy), not by this code.
+// Logs only the CORS negotiation headers — never Authorization, cookies or body.
+app.use((req, _res, next) => {
+  if (req.method === "OPTIONS") {
+    console.log("[CORS] OPTIONS reached Express", {
+      origin: req.headers.origin || "(none)",
+      requestMethod: req.headers["access-control-request-method"] || "(none)",
+      requestHeaders: req.headers["access-control-request-headers"] || "(none)",
+      path: req.path,
+    });
+  }
+  next();
+});
 
 // Pre-flight OPTIONS must be registered BEFORE app.use(cors()) and all routes
 app.options("*", cors(corsOptions));
@@ -166,6 +194,35 @@ app.use("/api/public",         require("./routes/publicPages"));   // published 
 app.get("/api/health", (_req, res) =>
   res.json({ status: "ok", ts: Date.now(), env: process.env.NODE_ENV })
 );
+
+// ── CORS diagnostics ──────────────────────────────────────────────────────────
+// Answers "what does this instance ACTUALLY believe at runtime?", which cannot be
+// inferred from the repo: each Render service carries its own env vars and may be
+// running a different commit. Reports the PARSED allow-list (public information —
+// the browser already knows these domains) plus which vars are merely PRESENT.
+// Never returns a secret, nor the raw value of any variable other than the
+// origins themselves. `commit` comes from Render's own RENDER_GIT_COMMIT.
+app.get("/api/health/cors", (req, res) => {
+  const origin = req.headers.origin || null;
+  const norm = origin ? bare(origin) : null;
+  res.json({
+    service:        process.env.RENDER_SERVICE_NAME || "(not on Render)",
+    commit:         process.env.RENDER_GIT_COMMIT   || "(unknown)",
+    branch:         process.env.RENDER_GIT_BRANCH   || "(unknown)",
+    nodeEnv:        process.env.NODE_ENV || "NOT SET",
+    allowedOrigins: ALLOWED_ORIGINS,
+    envVarsPresent: {
+      FRONTEND_URLS:  !!process.env.FRONTEND_URLS,
+      FRONTEND_URL:   !!process.env.FRONTEND_URL,
+      FRONTEND_URL_2: !!process.env.FRONTEND_URL_2,
+    },
+    // How THIS request's own origin was judged — the actual decision, not a guess.
+    yourOrigin: origin,
+    yourOriginAllowed: origin
+      ? ALLOWED_BARE.some((o) => norm === o || norm.startsWith(o + "/"))
+      : null,
+  });
+});
 
 // ── Debug (no secrets exposed) ────────────────────────────────────────────────
 app.get("/api/debug", (_req, res) => {
