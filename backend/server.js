@@ -185,6 +185,7 @@ app.use("/api/applications",   require("./routes/applications"));  // the PEOPLE
 app.use("/api/participations", require("./routes/applications").participations);
 app.use("/api/reports",        require("./routes/reports"));       // workspace-scoped AI reports
 app.use("/api/public",         require("./routes/publicPages"));   // published final-selection page
+app.use("/api/email-templates", require("./routes/emailTemplates")); // round-wise, admin-authored emails
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) =>

@@ -1,10 +1,12 @@
 const Candidate  = require("../models/Candidate");
 const Assessment = require("../models/Assessment");
 const { publicAppUrl } = require("./publicUrl");
+const Round      = require("../models/Round");
 const {
   sendLinkEmail, sendShortlistEmail, sendThankYouEmail, sendDisqualificationEmail,
-  emailConfigured, emailDiag, logMailError,
+  emailConfigured, emailDiag, logMailError, sendMail, BRAND,
 } = require("./email");
+const tpl = require("./emailTemplates");
 
 const MAX_ATTEMPTS  = parseInt(process.env.EMAIL_MAX_ATTEMPTS) || 3;
 const POLL_INTERVAL = parseInt(process.env.EMAIL_POLL_INTERVAL_MS) || 30000; // 30s
@@ -15,6 +17,35 @@ function buildLink(token) {
   // FRONTEND_URL is the comma-separated CORS allow-list, not a single URL —
   // joining it straight into a link produced an unopenable "a.com,b.com/..." URL.
   return `${publicAppUrl()}/assessment/${token}`;
+}
+
+/*
+ * Send the email THIS ROUND defines for an event, falling back to the built-in
+ * design when the round defines none.
+ *
+ * Three outcomes, and the middle one is the reason this exists:
+ *   template enabled  → send the admin's wording
+ *   template disabled → send NOTHING. The admin turned this email off, so
+ *                       quietly substituting the built-in would defeat the
+ *                       toggle and mail candidates they meant to leave alone.
+ *   no template       → built-in, so an unconfigured round is unchanged.
+ */
+async function sendForTrigger(trigger, { candidate, assessment, link = "", fallback }) {
+  const roundId = candidate?.roundId || assessment?.roundId || null;
+  let decision = { status: "none" };
+  try { decision = await tpl.resolve(roundId, trigger); }
+  catch (e) { console.warn(`[email] template lookup failed for ${trigger}: ${e.message} — using the built-in`); }
+
+  if (decision.status === "off") {
+    console.log(`[email] ${trigger} is turned OFF for this round — nothing sent to ${candidate?.email}`);
+    return null;
+  }
+  if (decision.status === "send") {
+    const round = roundId ? await Round.findById(roundId).select("name").lean() : null;
+    const vars  = tpl.varsFor({ candidate, assessment: assessment || {}, round: round || {}, link, brand: BRAND });
+    return sendMail(tpl.build(decision.template, vars, candidate.email));
+  }
+  return fallback();
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +68,8 @@ async function deliverLink(candidate) {
   }
   try {
     const link = buildLink(candidate.token);
-    const messageId = await sendLinkEmail(candidate, assessment, link);
+    const messageId = await sendForTrigger("ASSESSMENT_LINK", { candidate, assessment, link,
+      fallback: () => sendLinkEmail(candidate, assessment, link) });
     candidate.emailStatus = "sent"; candidate.emailSentAt = new Date();
     candidate.emailAttempts = (candidate.emailAttempts || 0) + 1; candidate.emailError = undefined;
     if (candidate.status === "invited") candidate.status = "email-sent";
@@ -75,7 +107,8 @@ async function deliverShortlist(candidate) {
     return { ok: false, error: "Assessment not found", email: candidate.email };
   }
   try {
-    const messageId = await sendShortlistEmail(candidate, assessment);
+    const messageId = await sendForTrigger("SHORTLIST", { candidate, assessment,
+      fallback: () => sendShortlistEmail(candidate, assessment) });
     candidate.shortlistEmail.status = "sent"; candidate.shortlistEmail.sentAt = new Date();
     candidate.shortlistEmail.attempts = (candidate.shortlistEmail.attempts || 0) + 1; candidate.shortlistEmail.error = undefined;
     await candidate.save();
@@ -108,11 +141,13 @@ async function deliverCompletion(candidate) {
   const disq = candidate.status === "disqualified";
   try {
     if (disq) {
-      await sendDisqualificationEmail(candidate);
+      await sendForTrigger("TERMINATED", { candidate, assessment,
+        fallback: () => sendDisqualificationEmail(candidate) });
       candidate.disqualificationEmailSentAt = new Date();
     } else {
       const assessment = await Assessment.findById(candidate.assessmentId).lean();
-      await sendThankYouEmail(candidate, assessment);
+      await sendForTrigger("SUBMITTED", { candidate, assessment,
+        fallback: () => sendThankYouEmail(candidate, assessment) });
       candidate.thankYouEmailSentAt = new Date();
     }
     candidate.completionEmail.status = "sent";
@@ -211,7 +246,8 @@ function startScheduler() {
 async function queueThankYou(candidate, assessment) {
   if (!emailConfigured()) return;
   try {
-    await sendThankYouEmail(candidate, assessment);
+    await sendForTrigger("SUBMITTED", { candidate, assessment,
+      fallback: () => sendThankYouEmail(candidate, assessment) });
     await Candidate.updateOne({ _id: candidate._id }, { $set: { thankYouEmailSentAt: new Date() } });
     console.log(`[emailQueue] ✔ thank-you sent to ${candidate.email}`);
   } catch (err) { logMailError(`thank-you ${candidate.email}`, err); }
@@ -220,7 +256,8 @@ async function queueThankYou(candidate, assessment) {
 async function queueDisqualification(candidate) {
   if (!emailConfigured()) return;
   try {
-    await sendDisqualificationEmail(candidate);
+    await sendForTrigger("TERMINATED", { candidate, assessment,
+      fallback: () => sendDisqualificationEmail(candidate) });
     await Candidate.updateOne({ _id: candidate._id }, { $set: { disqualificationEmailSentAt: new Date() } });
     console.log(`[emailQueue] ✔ disqualification email sent to ${candidate.email}`);
   } catch (err) { logMailError(`disqualification ${candidate.email}`, err); }
