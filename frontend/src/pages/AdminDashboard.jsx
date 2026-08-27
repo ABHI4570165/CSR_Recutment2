@@ -819,7 +819,7 @@ const WALKIN_FIELD_OPTS = [
   ["gender","Gender"], ["dob","Date of Birth"], ["aadhaar","Aadhaar"], ["location","Location"],
 ];
 
-function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedRoundId = null, lockedDriveId = null, onClose, onCreated }) {
+function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedRoundId = null, lockedRoundName = null, lockedDriveId = null, onClose, onCreated }) {
   const [name,setName]=useState("");
   const [driveType,setDriveType]=useState("PRE_REGISTERED");
   const [round,setRound]=useState(lockedRound ? Number(lockedRound) : 1);
@@ -849,6 +849,7 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
   // hard-coded ROUND2_PAPERS are only a fallback if that call fails.
   const [papers,setPapers]=useState(null);
   const [papersErr,setPapersErr]=useState("");
+  const [poolSize,setPoolSize]=useState(null);   // round-1 pool size in THIS workspace
 
   useEffect(()=>{
     let alive=true;
@@ -856,10 +857,22 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
       .then(r=>{
         if(!alive) return;
         const list=r?.data?.data?.papers||[];
-        if(!list.length){ setPapersErr("No Round-2 question sets found in the database for this workspace."); return; }
+        const bank=r?.data?.data?.bank||[];
+        // How big is this workspace's section pool? A workspace seeded only with
+        // prepared sets has none, and defaulting it to "Section pool" would build
+        // an empty paper — so start it on the sets it actually has.
+        const poolCount=bank.find(b=>b.round===1)?.total||0;
+        setPoolSize(poolCount);
+        if(!list.length){
+          setPapersErr(poolCount
+            ? "This workspace has no prepared question sets — use the section pool below."
+            : "This workspace has no questions yet. Add them under the Questions tab first.");
+          return;
+        }
         const map={}; list.forEach(p=>{ map[p.key]=p; });
         setPapers(map);
         setRound2Paper(prev=>map[prev]?prev:list[0].key);   // keep the choice if it still exists
+        if(!poolCount) setUseSets(true);                    // nothing else to draw from
       })
       .catch(()=>{ if(alive) setPapersErr("Could not load question sets from the server — showing the built-in list."); });
     return ()=>{ alive=false; };
@@ -929,13 +942,17 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
             <div className="ad-grid-2" style={{marginTop:12}}>
               <div className="ad-field"><label className="ad-label">Assessment Round</label>
                 <select className="ad-input ad-select" value={round} onChange={e=>setRound(Number(e.target.value))} disabled={!!lockedRound}>
-                  {(rounds && rounds.length
-                    ? rounds.map(r=>({v:r.sequence,l:`Round ${r.sequence} — ${r.name}`}))
-                    : [{v:1,l:"Round 1 — Aptitude pool (existing questions)"},
-                       {v:2,l:"Round 2 — Technical Sets A & B (auto-distributed)"}]
+                  {/* The round this drive belongs to. When opened from inside a
+                      round we know exactly which one, so show ITS name rather
+                      than a generic label that belongs to no workspace. */}
+                  {(lockedRoundName
+                    ? [{v:Number(lockedRound)||1,l:`Round ${lockedRound} — ${lockedRoundName}`}]
+                    : rounds && rounds.length
+                      ? rounds.map(r=>({v:r.sequence,l:`Round ${r.sequence} — ${r.name}`}))
+                      : [{v:Number(lockedRound)||1,l:`Round ${Number(lockedRound)||1}`}]
                   ).map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
                 </select>
-                {lockedRound && <div className="ad-hint">This drive belongs to the round you opened it from.</div>}</div>
+                {lockedRound && <div className="ad-hint">This drive belongs to the round you opened it from. Choose its question paper under <strong>❓ Question Configuration</strong> below.</div>}</div>
               <div className="ad-field"><label className="ad-label">Drive Type</label>
                 <select className="ad-input ad-select" value={driveType} onChange={e=>setDriveType(e.target.value)}>
                   <option value="PRE_REGISTERED">Pre-Registered (email invitations)</option>
@@ -994,9 +1011,16 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
             <div className="ad-field" style={{marginBottom:12}}>
               <label className="ad-label">Where do the questions come from?</label>
               <select className="ad-input ad-select" value={useSets?"sets":"pool"} onChange={e=>setUseSets(e.target.value==="sets")}>
-                <option value="pool">Section pool — pick sections and question counts</option>
-                <option value="sets">Fixed question set — a prepared paper (Sets A–D, Trainer…)</option>
+                <option value="pool">
+                  Section pool — pick sections and question counts{poolSize!=null?` (${poolSize} questions)`:""}
+                </option>
+                <option value="sets">
+                  Fixed question set — a prepared paper{papers?` (${Object.keys(papers).length} available)`:""}
+                </option>
               </select>
+              {poolSize===0 && !useSets && (
+                <span className="ad-hint">This workspace has no section-pool questions — switch to <strong>Fixed question set</strong>.</span>
+              )}
             </div>
             {useSets ? (<>
               <div className="ad-field">
@@ -1274,7 +1298,7 @@ function UploadModal({ assessment, onClose, onDone }) {
   );
 }
 
-function DrivesTab({ wsRounds = null, lockedRound = null, lockedRoundId = null, lockedDriveId = null }) {
+function DrivesTab({ wsRounds = null, lockedRound = null, lockedRoundId = null, lockedRoundName = null, lockedDriveId = null }) {
   // wsRounds  — the OPEN WORKSPACE's rounds ({sequence,name}). When supplied the
   //             round tabs below are generated from them instead of the two
   //             hard-coded legacy labels, so a workspace with 5 rounds shows 5.
@@ -1465,7 +1489,7 @@ function DrivesTab({ wsRounds = null, lockedRound = null, lockedRoundId = null, 
   if(!sel) return (
     <div>
       {toastEl}{confirmEl}
-      {showCreate && <CreateDriveModal sections={sections} rounds={wsRounds} lockedRound={lockedRound || roundFilter} lockedRoundId={lockedRoundId} lockedDriveId={lockedDriveId} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
+      {showCreate && <CreateDriveModal sections={sections} rounds={wsRounds} lockedRound={lockedRound || roundFilter} lockedRoundId={lockedRoundId} lockedRoundName={lockedRoundName} lockedDriveId={lockedDriveId} onClose={()=>setShowCreate(false)} onCreated={(createdRound)=>{setShowCreate(false); if(createdRound) setRoundFilter(String(createdRound)); loadDrives();}}/>}
       {editDrive && <EditDriveModal drive={editDrive} onClose={()=>setEditDrive(null)} onSaved={()=>{setEditDrive(null);loadDrives();}}/>}
       <div className="ad-section-head">
         <div className="ad-page-title">Campus Drives</div>
@@ -2476,7 +2500,7 @@ function WorkspaceRoundDrives({ readOnly }) {
             attaches it to Round {openRound.sequence}.
           </div>
           <DrivesTab lockedRound={openRound.sequence} lockedRoundId={openRound._id}
-                     lockedDriveId={openRound.driveId} readOnly={readOnly}/>
+                     lockedRoundName={openRound.name} lockedDriveId={openRound.driveId} readOnly={readOnly}/>
         </div>
       )}
     </div>
