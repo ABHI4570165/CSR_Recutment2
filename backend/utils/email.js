@@ -1,6 +1,7 @@
 const nodemailer = require("nodemailer");
 const path = require("path");
 const fs = require("fs");
+const { publicAppUrl } = require("./publicUrl");
 
 let transporter = null;
 
@@ -8,7 +9,7 @@ let transporter = null;
 // A hosted HTTPS URL renders reliably in Gmail, Outlook, and all webmail —
 // works in both SMTP and Brevo HTTPS API mode (no CID, no attachment).
 function logoImgTag() {
-  const logoUrl = `${(process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "")}/logo.png`;
+  const logoUrl = `${publicAppUrl()}/logo.png`;
   return `<img src="${logoUrl}" alt="M H Foundation" width="64" height="64" style="display:block;margin:0 auto 10px;border-radius:12px;background:#fff;padding:4px;" />`;
 }
 

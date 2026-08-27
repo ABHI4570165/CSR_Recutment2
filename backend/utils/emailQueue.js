@@ -1,5 +1,6 @@
 const Candidate  = require("../models/Candidate");
 const Assessment = require("../models/Assessment");
+const { publicAppUrl } = require("./publicUrl");
 const {
   sendLinkEmail, sendShortlistEmail, sendThankYouEmail, sendDisqualificationEmail,
   emailConfigured, emailDiag, logMailError,
@@ -11,8 +12,9 @@ const BATCH_SIZE    = parseInt(process.env.EMAIL_BATCH_SIZE) || 25;          // 
 const STALE_SENDING_MS = 5 * 60 * 1000; // re-queue a "sending" row stuck this long (crash recovery)
 
 function buildLink(token) {
-  const base = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
-  return `${base}/assessment/${token}`;
+  // FRONTEND_URL is the comma-separated CORS allow-list, not a single URL —
+  // joining it straight into a link produced an unopenable "a.com,b.com/..." URL.
+  return `${publicAppUrl()}/assessment/${token}`;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
