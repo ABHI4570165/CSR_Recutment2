@@ -4,9 +4,10 @@ const Round = require("../models/Round");
 const Assessment = require("../models/Assessment");
 const { legacyScope } = require("../utils/legacyScope");
 const { render, build, varsFor, PLACEHOLDERS } = require("../utils/emailTemplates");
-const { sendMail } = require("../utils/email");
-
-const BRAND = process.env.BRAND_NAME || "M H Foundation";
+// BRAND comes from the mail module rather than being redefined here: a second
+// copy is how preview and test-send end up showing a different organisation name
+// from the email a candidate actually receives.
+const { sendMail, BRAND } = require("../utils/email");
 
 // Triggers offered to the admin, with what actually fires each one. The list is
 // served rather than hard-coded in the UI so a new trigger needs no frontend change.

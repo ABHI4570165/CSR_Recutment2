@@ -3,6 +3,11 @@ const path = require("path");
 const fs = require("fs");
 const { publicAppUrl } = require("./publicUrl");
 
+// The organisation name shown in every email. One constant so a rename is one
+// change: the trainer templates reference it through {{brand}}, and the built-in
+// emails interpolate it directly. BRAND_NAME overrides it without a deploy.
+const BRAND = process.env.BRAND_NAME || "M H Academy";
+
 let transporter = null;
 
 // Logo referenced from the public frontend origin (FRONTEND_URL/logo.png).
@@ -10,7 +15,7 @@ let transporter = null;
 // works in both SMTP and Brevo HTTPS API mode (no CID, no attachment).
 function logoImgTag() {
   const logoUrl = `${publicAppUrl()}/logo.png`;
-  return `<img src="${logoUrl}" alt="M H Foundation" width="64" height="64" style="display:block;margin:0 auto 10px;border-radius:12px;background:#fff;padding:4px;" />`;
+  return `<img src="${logoUrl}" alt="${BRAND}" width="64" height="64" style="display:block;margin:0 auto 10px;border-radius:12px;background:#fff;padding:4px;" />`;
 }
 
 // ── Delivery mode ──────────────────────────────────────────────────────────────
@@ -84,10 +89,10 @@ function emailDiag() {
 
 // Parse "Name <email@x>" or "email@x" into { name, email } for the Brevo API.
 function parseFrom(raw) {
-  const s = String(raw || "M H Foundation <no-reply@mhacademy.in>").trim();
+  const s = String(raw || `${BRAND} <no-reply@mhacademy.in>`).trim();
   const m = s.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
-  if (m) return { name: m[1].trim() || "M H Foundation", email: m[2].trim() };
-  return { name: "M H Foundation", email: s };
+  if (m) return { name: m[1].trim() || BRAND, email: m[2].trim() };
+  return { name: BRAND, email: s };
 }
 
 // ── Send over Brevo HTTPS API (port 443 — not blocked on Render) ───────────────
@@ -161,7 +166,7 @@ async function sendMail({ to, subject, html, text, attachments }) {
     if (api) return await sendViaBrevoApi({ to, subject, html, text, attachments });
     const t = getTransporter();
     const info = await t.sendMail({
-      from: process.env.EMAIL_FROM || "M H Foundation <noreply@mhacademy.in>",
+      from: process.env.EMAIL_FROM || `${BRAND} <noreply@mhacademy.in>`,
       to, subject, html, text,
       ...(attachments && attachments.length ? { attachments } : {}),
     });
@@ -174,7 +179,6 @@ async function sendMail({ to, subject, html, text, attachments }) {
 }
 
 // ── Brand constants ───────────────────────────────────────────────────────────
-const BRAND = "M H FOUNDATION";
 const HIRING_PARTNER = "Inference Labs Private Limited";
 const PRIMARY = "#1a56db";
 // WhatsApp community group candidates are invited to join after completing the test.
@@ -410,11 +414,11 @@ async function sendQuizLink(to, name, quizLink) {
   try {
     await sendMail({
       to,
-      subject: "Your Quiz Link — M H Foundation",
+      subject: `Your Quiz Link — ${BRAND}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
           <div style="background:linear-gradient(135deg,#1a56db,#1e40af);padding:32px 28px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:22px;">M H Foundation</h1>
+            <h1 style="color:#fff;margin:0;font-size:22px;">${BRAND}</h1>
           </div>
           <div style="padding:32px 28px;">
             <h2 style="color:#111827;font-size:18px;margin:0 0 12px;">Hello, ${name}! 👋</h2>
