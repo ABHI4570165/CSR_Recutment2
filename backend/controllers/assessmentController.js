@@ -1330,10 +1330,27 @@ exports.saveProgress = async (req, res) => {
   }
 };
 
-// Pure scorer — grades a saved attempt. Shared by the live submit path AND the
-// server-side timeout auto-submit so both grade identically (no divergence).
+/*
+ * Pure scorer — grades a saved attempt. Shared by the live submit path AND the
+ * server-side timeout auto-submit so both grade identically.
+ *
+ * Two kinds of question, and the difference is the whole point:
+ *
+ *   Gradable now   MCQs, and typed answers whose text matches the expected
+ *                  output exactly. Marked here, COMPLETED, marks awarded.
+ *
+ *   Needs reading  Open-ended answers, and typed answers that did not match.
+ *                  Left PENDING with marks 0 and counted into `pendingMarks`.
+ *
+ * PENDING IS NOT WRONG. A pending row scores 0 only because nobody has read it
+ * yet, so `score` must be understood as "of what has been graded" — never as a
+ * final mark. Treating the two as the same is how a candidate ends up rejected
+ * by a cutoff on a paper that was never evaluated.
+ *
+ * An unanswered open question needs no evaluator: nothing to read is 0.
+ */
 function scoreAttempt(qids, qmap, answers, optionOrder, sections) {
-  let score = 0, totalMarks = 0;
+  let score = 0, totalMarks = 0, pendingMarks = 0;
   const sectionScores = {};
   (sections || []).forEach(s => { sectionScores[s.name] = 0; });
   const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -1341,28 +1358,70 @@ function scoreAttempt(qids, qmap, answers, optionOrder, sections) {
   (qids || []).forEach(qid => {
     const q = qmap[qid];
     if (!q) return;
-    totalMarks += q.marks || 1;
+    const max = q.marks || 1;
+    totalMarks += max;
     const ans = answers[qid];
+    const answered = ans != null && ans !== "";
     const correctAns = q.type === "text" ? (q.answerText ?? null) : (q.options?.[q.correctIndex] ?? null);
-    let correct = false, given = null;
-    if (ans != null && ans !== "") {
-      if (q.type === "text") {
-        given = String(ans);
-        correct = q.answerText != null && norm(ans) === norm(q.answerText);
-      } else {
-        const origIdx = (optionOrder[qid] || [])[ans];
-        given = origIdx != null && q.options ? (q.options[origIdx] ?? null) : null;
-        correct = origIdx === q.correctIndex;
-      }
-      if (correct) {
-        score += q.marks || 1;
-        sectionScores[q.section] = (sectionScores[q.section] || 0) + (q.marks || 1);
-      }
+    let correct = false, given = null, evalStatus = "COMPLETED", marks = 0;
+
+    if (q.type === "text") {
+      given = answered ? String(ans) : null;
+      // Exact match first: a crisp expected output ("[1, 2, 3, 4]", "False") is
+      // graded here and for free. Only what it cannot settle goes to a reader.
+      const exact = answered && q.answerText != null && norm(ans) === norm(q.answerText);
+      if (exact) { correct = true; marks = max; }
+      else if (answered) { evalStatus = "PENDING"; pendingMarks += max; }
+      // Unanswered stays COMPLETED at 0 — there is nothing for anyone to read.
+    } else if (answered) {
+      const origIdx = (optionOrder[qid] || [])[ans];
+      given = origIdx != null && q.options ? (q.options[origIdx] ?? null) : null;
+      correct = origIdx === q.correctIndex;
+      if (correct) marks = max;
     }
-    answerSheet.push({ qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 });
+
+    if (marks) {
+      score += marks;
+      sectionScores[q.section] = (sectionScores[q.section] || 0) + marks;
+    }
+    answerSheet.push({ qid, section: q.section, given, correct: correctAns,
+      isCorrect: correct, marks, maxMarks: max, evalStatus });
   });
-  return { score, totalMarks, sectionScores, answerSheet };
+  const evaluationStatus = answerSheet.some(r => r.evalStatus === "PENDING") ? "PENDING" : "COMPLETED";
+  return { score, totalMarks, pendingMarks, sectionScores, answerSheet, evaluationStatus };
 }
+
+/*
+ * Recompute a paper's totals FROM ITS OWN ROWS.
+ *
+ * The only place a total is ever produced. A client never submits a score, and
+ * an evaluator only ever writes one row — the total is derived here so a bad or
+ * replayed evaluation cannot inflate a result.
+ */
+function recomputeTotals(candidate) {
+  const rows = candidate.answerSheet || [];
+  let score = 0, totalMarks = 0, pendingMarks = 0;
+  const sectionScores = {};
+  let anyPending = false, anyProcessing = false, anyFailed = false;
+  rows.forEach(r => {
+    const max = r.maxMarks || 1;
+    totalMarks += max;
+    score += r.marks || 0;
+    sectionScores[r.section] = (sectionScores[r.section] || 0) + (r.marks || 0);
+    if (r.evalStatus === "PENDING")    { anyPending = true;    pendingMarks += max; }
+    if (r.evalStatus === "PROCESSING") { anyProcessing = true; pendingMarks += max; }
+    if (r.evalStatus === "FAILED")     { anyFailed = true;     pendingMarks += max; }
+  });
+  // FAILED outranks PENDING: it needs a human, not more waiting.
+  const evaluationStatus = anyFailed ? "FAILED"
+    : anyPending ? "PENDING"
+    : anyProcessing ? "PROCESSING"
+    : "COMPLETED";
+  return { score, totalMarks, pendingMarks, sectionScores, evaluationStatus };
+}
+
+exports._recomputeTotals = recomputeTotals;   // used by the evaluation worker API
+exports._scoreAttempt = scoreAttempt;         // exported so the scoring rules can be tested directly
 
 // POST /api/candidate/:token/submit
 // Body: { answers:{qid:displayIdx}, timedOut?, reason?, violations? }
@@ -1390,10 +1449,12 @@ exports.submitCandidate = async (req, res) => {
     const qmap = {};
     docs.forEach(q => { qmap[String(q._id)] = q; });
 
-    const { score, totalMarks, sectionScores, answerSheet } =
+    const { score, totalMarks, pendingMarks, sectionScores, answerSheet, evaluationStatus } =
       scoreAttempt(qids, qmap, answers, optionOrder, assessment.sections);
 
-    const passed = score >= (assessment.passingScore || 0);
+    // With marks still unread, "passed" cannot be decided yet — a paper awaiting
+    // an evaluator would otherwise fail on a partial score.
+    const passed = evaluationStatus === "COMPLETED" && score >= (assessment.passingScore || 0);
     const elapsed = c.startedAt
       ? Math.floor((now() - new Date(c.startedAt).getTime()) / 1000) : 0;
 
@@ -1412,6 +1473,9 @@ exports.submitCandidate = async (req, res) => {
     c.completedAt = new Date();
     c.score = score;
     c.totalMarks = totalMarks;
+    c.pendingMarks = pendingMarks;
+    c.evaluationStatus = evaluationStatus;
+    if (evaluationStatus === "COMPLETED") c.evaluatedAt = new Date();
     c.passed = disqualified ? false : passed;
     c.sectionScores = sectionScores;
     c.timeTakenSeconds = elapsed;
@@ -1473,9 +1537,9 @@ async function autoSubmitTimedOut() {
       const docs = await Question.find({ _id: { $in: qids } }).lean();
       const qmap = {}; docs.forEach(q => { qmap[String(q._id)] = q; });
 
-      const { score, totalMarks, sectionScores, answerSheet } =
+      const { score, totalMarks, pendingMarks, sectionScores, answerSheet, evaluationStatus } =
         scoreAttempt(qids, qmap, answers, optionOrder, a.sections);
-      const passed = score >= (a.passingScore || 0);
+      const passed = evaluationStatus === "COMPLETED" && score >= (a.passingScore || 0);
 
       // Atomic claim + finalize: the status condition means only ONE instance wins.
       const upd = await Candidate.findOneAndUpdate(
@@ -1484,6 +1548,8 @@ async function autoSubmitTimedOut() {
           $set: {
             status: "completed", submissionReason: "timed-out", completedAt: new Date(),
             score, totalMarks, passed, sectionScores, timeTakenSeconds: elapsed, answerSheet,
+            pendingMarks, evaluationStatus,
+            ...(evaluationStatus === "COMPLETED" ? { evaluatedAt: new Date() } : {}),
           },
           $unset: { progress: "" },
         },

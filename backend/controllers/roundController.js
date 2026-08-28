@@ -153,6 +153,24 @@ exports.applyCutoff = async (req, res) => {
     const value = req.body?.value != null ? Number(req.body.value) : round.cutoff?.value;
     if (method === "NONE") return res.status(400).json({ success: false, message: "Choose a cutoff method first." });
 
+    /*
+     * A cutoff compares scores, so it must not run while any of those scores is
+     * still incomplete. An answer awaiting an evaluator carries 0 marks — not
+     * because it was wrong, but because nobody has read it — so applying a
+     * cutoff now would reject candidates on a partial mark and record it as a
+     * decision. `?force=true` is available for the case where the pending papers
+     * are known to be irrelevant, but it is never the default.
+     */
+    const stillPending = await Candidate.countDocuments({
+      roundId: round._id, isPrimary: true,
+      evaluationStatus: { $in: ["PENDING", "PROCESSING"] },
+    });
+    if (stillPending && String(req.query.force) !== "true") {
+      return res.status(409).json({ success: false,
+        message: `${stillPending} candidate(s) in this round are still awaiting evaluation. Their open answers currently score 0 because nobody has marked them yet, so a cutoff applied now would reject them on an incomplete score. Run the evaluation worker first, or re-send with ?force=true if you are certain.`,
+        data: { pendingCandidates: stillPending } });
+    }
+
     const parts = await Candidate.find({ roundId: round._id, isPrimary: true });
     const { qualified } = decideQualified(
       { ...round.toObject(), cutoff: { method, value } },

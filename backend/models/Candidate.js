@@ -204,9 +204,41 @@ const candidateSchema = new mongoose.Schema({
       correct:   { type: String, default: null },  // correct answer at submission time
       isCorrect: { type: Boolean, default: false },
       marks:     { type: Number, default: 0 },     // marks earned on this question
+      maxMarks:  { type: Number, default: 1 },     // marks this question was worth
+
+      /* ── AI evaluation (open-ended answers only) ────────────────────────────
+       * MCQs and exact-output answers are graded at submit and are COMPLETED
+       * immediately. Everything an evaluator has to read is PENDING until the
+       * local worker scores it.
+       *
+       * PENDING IS NOT ZERO. `marks` stays 0 while pending, so the totals must
+       * never present a pending paper as a finished score — a cutoff applied to
+       * one would reject a candidate on a partial mark.
+       */
+      evalStatus:   { type: String, enum: ["COMPLETED", "PENDING", "PROCESSING", "FAILED"], default: "COMPLETED", index: true },
+      evalReason:   { type: String, default: null },   // why the evaluator awarded this
+      matched:      { type: [String], default: undefined },
+      missing:      { type: [String], default: undefined },
+      confidence:   { type: Number, default: null },
+      evaluatedAt:  { type: Date },
+      evalAttempts: { type: Number, default: 0 },
+      evalError:    { type: String, default: null },
+      // Set when a row is leased by a worker; a lease older than the timeout is
+      // reclaimed, so a worker that dies mid-question does not strand it.
+      leasedAt:     { type: Date },
     }, { _id: false })],
     default: undefined,
   },
+
+  /* ── Paper-level evaluation state ─────────────────────────────────────────
+   * `score` counts ONLY what has actually been graded. `pendingMarks` is what
+   * is still unmarked, so "18/100 with 80 pending" can never be mistaken for
+   * "18/100 final". evaluationStatus is derived from the rows, never set by a
+   * client.
+   */
+  evaluationStatus: { type: String, enum: ["COMPLETED", "PENDING", "PROCESSING", "FAILED"], default: "COMPLETED", index: true },
+  pendingMarks:     { type: Number, default: 0 },   // marks still awaiting evaluation
+  evaluatedAt:      { type: Date },
 
   startedAt:   { type: Date },
   completedAt: { type: Date },
