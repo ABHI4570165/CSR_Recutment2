@@ -138,7 +138,23 @@ exports.submitResults = async (req, res) => {
         // duplicated post cannot add marks twice.
         if (row.evalStatus === "COMPLETED") { rejected.push({ qid: r.qid, reason: "already evaluated" }); continue; }
 
-        if (r.error) {                          // the worker could not grade it
+        /*
+         * RELEASE — the worker could not even attempt this one, because Ollama
+         * was down or the machine is shutting down. That is infrastructure, not
+         * an evaluation, so the lease is handed back AND the attempt is undone.
+         * Counting it would let a laptop being asleep burn through the retries
+         * and park a perfectly good answer as FAILED.
+         */
+        if (r.release) {
+          row.evalStatus = "PENDING";
+          row.evalAttempts = Math.max(0, (row.evalAttempts || 1) - 1);
+          row.leasedAt = undefined;
+          row.evalError = r.reason ? String(r.reason).slice(0, 300) : null;
+          touched = true;
+          continue;                              // not a rejection: nothing was judged
+        }
+
+        if (r.error) {                          // attempted, but could not be graded
           row.evalStatus = (row.evalAttempts || 0) >= MAX_ATTEMPTS ? "FAILED" : "PENDING";
           row.evalError = String(r.error).slice(0, 300);
           row.leasedAt = undefined;
@@ -187,7 +203,9 @@ exports.submitResults = async (req, res) => {
         await c.save();
       }
     }
-    res.json({ success: true, data: { accepted: accepted.length, rejected: rejected.length, rejections: rejected } });
+    const released = results.filter(r => r.release).length;
+    res.json({ success: true, data: {
+      accepted: accepted.length, rejected: rejected.length, released, rejections: rejected } });
   } catch (err) {
     console.error("submitResults error:", err);
     res.status(500).json({ success: false, message: "Failed to save evaluation results." });

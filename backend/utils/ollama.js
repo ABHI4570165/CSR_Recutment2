@@ -1,5 +1,16 @@
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+// OLLAMA_BASE_URL is the documented name; OLLAMA_URL is accepted for the older
+// config. This address is only ever dialled by a process running ON the same
+// machine as Ollama — the local evaluation worker, never the production API.
+const OLLAMA_URL = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1:8b";
+
+// Distinguishes "Ollama is not reachable" from "Ollama answered badly". The
+// first must never cost a candidate a retry, let alone a mark; the second is a
+// genuine evaluation failure. Anything else would let a laptop being asleep turn
+// into FAILED answers.
+class OllamaUnavailable extends Error {
+  constructor(message) { super(message); this.name = "OllamaUnavailable"; this.unavailable = true; }
+}
 
 /*
  * Single Ollama client for the whole backend.
@@ -28,15 +39,21 @@ async function isAvailable() {
  * connection stays alive for as long as generation needs.
  */
 async function generate(prompt, { timeoutMs = 1800000, temperature = 0.3, onToken = null } = {}) {
-  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+  let res;
+  try {
+    res = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: OLLAMA_MODEL, prompt, stream: true,
       options: { temperature, num_ctx: 16384, num_predict: 4096 },
     }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    // Connection refused / DNS / timeout — Ollama is down, not wrong.
+    throw new OllamaUnavailable(`Ollama is not reachable at ${OLLAMA_URL}: ${e.message}`);
+  }
   if (!res.ok) throw new Error(`Ollama error ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
   let out = "", buf = "";
@@ -57,4 +74,4 @@ async function generate(prompt, { timeoutMs = 1800000, temperature = 0.3, onToke
   return out.trim();
 }
 
-module.exports = { isAvailable, generate, OLLAMA_URL, OLLAMA_MODEL };
+module.exports = { isAvailable, generate, OllamaUnavailable, OLLAMA_URL, OLLAMA_MODEL };
