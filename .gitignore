@@ -33,8 +33,14 @@ backend/scripts/migrations/out/
 loadtest/*-results.json
 loadtest/full-flow-summary.json
 
-# Environment secrets — NEVER commit these
+# Environment secrets — NEVER commit these.
+# The wildcards matter: `backend/.env` alone does NOT cover .env.backup-…,
+# .env.local or .env.save, and a copy of a secrets file is still a secrets file.
 backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.worker.example
+*.env.backup*
 # Local dev frontend env (localhost) — must NOT override Vercel/Hostinger build config
 frontend/.env
 

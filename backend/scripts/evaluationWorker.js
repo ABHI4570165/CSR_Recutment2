@@ -19,7 +19,16 @@
 require("dotenv").config();
 const ollama = require("../utils/ollama");
 
-const API   = (process.env.API_BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
+/*
+ * One or more production backends, comma-separated. They share one database, so
+ * any of them can serve the queue — listing several means a single instance
+ * being asleep, restarting or cold-starting does not stall evaluation.
+ * Requests start at the first and rotate on failure.
+ */
+const APIS = String(process.env.API_BASE_URL || process.env.API_BASE_URLS || "http://localhost:8080")
+  .split(",").map(u => u.trim().replace(/\/+$/, "")).filter(Boolean);
+let apiIdx = 0;
+const currentApi = () => APIS[apiIdx % APIS.length];
 const KEY   = process.env.EVALUATOR_API_KEY || "";
 const BATCH = parseInt(process.env.EVAL_BATCH) || 5;
 // Idle poll. Short enough to pick work up promptly, long enough not to hammer
@@ -29,15 +38,39 @@ const ONCE  = process.argv.includes("--once");
 
 const log = (...a) => console.log(`[worker ${new Date().toISOString().slice(11, 19)}]`, ...a);
 
+/*
+ * Try each backend in turn. A refused connection, a timeout or a 5xx means that
+ * instance is unavailable, so move to the next — Render instances sleep and
+ * cold-start, and one being slow should not stall the queue.
+ *
+ * A 4xx is NOT retried across instances: a rejected key or a malformed body is
+ * rejected identically everywhere, so retrying would only multiply it.
+ */
 async function api(path, opts = {}) {
-  const r = await fetch(`${API}/api/evaluation${path}`, {
-    ...opts,
-    headers: { "X-Evaluator-Key": KEY, "Content-Type": "application/json", ...(opts.headers || {}) },
-    signal: AbortSignal.timeout(60000),
-  });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.message || `${path} -> HTTP ${r.status}`);
-  return body.data;
+  let lastErr;
+  for (let hop = 0; hop < APIS.length; hop++) {
+    const base = currentApi();
+    try {
+      const r = await fetch(`${base}/api/evaluation${path}`, {
+        ...opts,
+        headers: { "X-Evaluator-Key": KEY, "Content-Type": "application/json", ...(opts.headers || {}) },
+        signal: AbortSignal.timeout(60000),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) return body.data;
+      const err = new Error(body.message || `${path} -> HTTP ${r.status}`);
+      // Marked so the catch below re-throws instead of rotating: a rejected key
+      // or a malformed body gets the same answer from every instance.
+      if (r.status < 500) { err.clientError = true; throw err; }
+      lastErr = err;
+    } catch (e) {
+      if (e.clientError) throw e;
+      lastErr = e;
+    }
+    apiIdx++;
+    if (APIS.length > 1) log(`  backend unavailable — trying ${currentApi()}`);
+  }
+  throw lastErr || new Error("all backends unavailable");
 }
 
 /*
@@ -182,7 +215,7 @@ async function waitFor(label, check, everyMs = POLL) {
     console.error("It authenticates this worker to the production API. It is NOT an Ollama key.");
     process.exit(1);
   }
-  log(`API      ${API}`);
+  log(`API      ${APIS.length} backend(s): ${APIS.join(", ")}`);
   log(`Ollama   ${ollama.OLLAMA_URL}  model ${ollama.OLLAMA_MODEL}`);
   log("Ollama is dialled ONLY from this machine; the production server never calls it.");
 
