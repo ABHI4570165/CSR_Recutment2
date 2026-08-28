@@ -25,10 +25,32 @@ function logoImgTag() {
 // (and is what runs locally).
 function usingApi() { return !!process.env.BREVO_API_KEY; }
 
-// Structural sanity check for the Brevo key (no value exposed).
+/*
+ * Structural sanity check for the Brevo key. No value is exposed.
+ *
+ * The v3 endpoint this code posts to needs an API key ("xkeysib-"). The check
+ * previously demanded "xsmtpsib-", which is the SMTP credential — so a correct
+ * key reported invalid and sent people looking in the wrong place.
+ */
 function apiKeyLooksValid() {
-  const k = process.env.BREVO_API_KEY || "";
-  return k.startsWith("xsmtpsib-") && k.length > 50;
+  const k = (process.env.BREVO_API_KEY || "").trim();
+  return k.startsWith("xkeysib-") && k.length > 50;
+}
+
+// Shape of the configured key, for diagnosis. Prefix and length only — enough to
+// tell an SMTP key from an API key, or spot whitespace, without printing a secret.
+function apiKeyShape() {
+  const raw = process.env.BREVO_API_KEY || "";
+  const k = raw.trim();
+  if (!k) return null;
+  return {
+    prefix: k.slice(0, 8),
+    length: k.length,
+    hasSurroundingWhitespace: raw !== k,
+    hasInnerWhitespace: /\s/.test(k),
+    looksLikeSmtpKey: k.startsWith("xsmtpsib-"),
+    looksLikeApiKey: k.startsWith("xkeysib-"),
+  };
 }
 
 // Full, password-free error dump for Render logs.
@@ -83,6 +105,7 @@ function emailDiag() {
     userSet: !!process.env.EMAIL_USER,
     passSet: !!process.env.EMAIL_PASS,
     from: process.env.EMAIL_FROM || "(default)",
+    apiKeyShape: apiKeyShape(),
     configured: emailConfigured(),
   };
 }
@@ -117,16 +140,24 @@ async function sendViaBrevoApi({ to, subject, html, text, attachments }) {
   try {
     resp = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
-      headers: { "api-key": process.env.BREVO_API_KEY, "content-type": "application/json", accept: "application/json" },
+      // Trimmed: a value pasted into a dashboard field often carries a trailing
+      // newline or space, and Brevo answers that with a plain 401 that looks
+      // exactly like a revoked key.
+      headers: { "api-key": String(process.env.BREVO_API_KEY || "").trim(),
+                 "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
     data = await resp.json().catch(() => ({}));
   } finally { clearTimeout(timer); }
   if (!resp.ok) {
+    // Brevo's own code/message is kept: "unauthorized" from an IP restriction and
+    // "unauthorized" from a revoked key look identical once replaced with a guess,
+    // and they need completely different fixes.
+    const detail = [data?.code, data?.message].filter(Boolean).join(" — ") || JSON.stringify(data);
     const msg = resp.status === 401
-      ? "Brevo API key is invalid or has been revoked. Regenerate it at app.brevo.com → Settings → API Keys and update BREVO_API_KEY in your Render environment variables."
-      : `Brevo API ${resp.status}: ${data?.message || data?.code || JSON.stringify(data)}`;
+      ? `Brevo rejected the API key (401): ${detail}. Check that BREVO_API_KEY is an API key (starts "xkeysib-", from Settings → API Keys — NOT the SMTP key), that it has not been revoked, and that Brevo's "Authorised IPs" restriction is off, since this server's IP changes.`
+      : `Brevo API ${resp.status}: ${detail}`;
     const e = new Error(msg);
     e.code = `BREVO_${resp.status}`; e.responseCode = resp.status; e.response = JSON.stringify(data);
     throw e;
