@@ -863,6 +863,33 @@ function SecurityToggles({ value, onChange, config, onConfigChange }) {
 }
 
 // Combine a yyyy-mm-dd date input and HH:MM time input into an ISO datetime.
+/*
+ * Spells the window out in words. "10:00 to 09:00" reads as a mistake until you
+ * notice it ends the NEXT day, so the resolved span is shown rather than left
+ * for the admin to work out from two dates and two times.
+ */
+function WindowSummary({ date, startTime, endDate, endTime }) {
+  const a = combineDateTime(date, startTime);
+  const b = combineDateTime(endDate || date, endTime);
+  if (!a || !b) return null;
+  const hrs = (new Date(b) - new Date(a)) / 3600000;
+  if (hrs <= 0) return (
+    <div className="ad-note ad-note--purple" style={{ marginTop: 10 }}>
+      This window ends before it starts. Set an <strong>End Date</strong> if the drive runs past midnight.
+    </div>
+  );
+  const f = (d) => new Date(d).toLocaleString("en-IN",
+    { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+  const span = hrs >= 24
+    ? `${Number((hrs / 24).toFixed(1))} day${hrs / 24 >= 2 ? "s" : ""}`
+    : `${Number(hrs.toFixed(1))} hour${hrs >= 2 ? "s" : ""}`;
+  return (
+    <div className="ad-note ad-note--info" style={{ marginTop: 10 }}>
+      Open <strong>{f(a)}</strong> → <strong>{f(b)}</strong> · {span} window
+    </div>
+  );
+}
+
 function combineDateTime(dateStr, timeStr) {
   if (!dateStr || !timeStr) return undefined;
   const dt = new Date(`${dateStr}T${timeStr}`);
@@ -896,6 +923,10 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
   const [passing,setPassing]=useState(30);
   const [date,setDate]=useState("");
   const [startTime,setStartTime]=useState("10:00");
+  // The window used to be two times pinned to ONE date, so it could never cross
+  // midnight or run longer than a day. An explicit end date lifts that: leave it
+  // blank for a same-day drive, or set it for a window open across days.
+  const [endDate,setEndDate]=useState("");
   const [endTime,setEndTime]=useState("13:00");
   const [linkSendOption,setLinkSendOption]=useState("30min");
   const [linkSendCustom,setLinkSendCustom]=useState("");
@@ -953,9 +984,9 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
     if(!useSets && !chosen.length){ setErr("Select at least one section."); return; }
     if(!date){ setErr("Assessment date is required."); return; }
     const startAt=combineDateTime(date,startTime);
-    const endAt=combineDateTime(date,endTime);
+    const endAt=combineDateTime(endDate||date,endTime);   // blank end date = same day
     if(!startAt||!endAt){ setErr("Valid start and end times are required."); return; }
-    if(new Date(endAt)<=new Date(startAt)){ setErr("End time must be after start time."); return; }
+    if(new Date(endAt)<=new Date(startAt)){ setErr("The window must end after it starts. For a drive running past midnight, set an End Date too."); return; }
     if(linkSendOption==="custom" && !linkSendCustom){ setErr("Pick a custom link send date & time."); return; }
     setSaving(true); setErr("");
     try{
@@ -1046,14 +1077,21 @@ function CreateDriveModal({ sections, rounds = null, lockedRound = null, lockedR
 
           <section className="ad-card-section">
             <div className="ad-card-section-title">🗓️ Assessment Schedule</div>
-            <div className="ad-grid-3">
-              <div className="ad-field"><label className="ad-label">Assessment Date</label>
+            <div className="ad-grid-2">
+              <div className="ad-field"><label className="ad-label">Start Date</label>
                 <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
               <div className="ad-field"><label className="ad-label">Start Time</label>
                 <input type="time" className="ad-input" value={startTime} onChange={e=>setStartTime(e.target.value)}/></div>
+            </div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">End Date</label>
+                <input type="date" className="ad-input" value={endDate} min={date||undefined}
+                  onChange={e=>{setEndDate(e.target.value);setErr("");}}/>
+                <span className="ad-hint">Leave blank for a same-day drive.</span></div>
               <div className="ad-field"><label className="ad-label">End Time</label>
                 <input type="time" className="ad-input" value={endTime} onChange={e=>setEndTime(e.target.value)}/></div>
             </div>
+            <WindowSummary date={date} startTime={startTime} endDate={endDate} endTime={endTime}/>
             {driveType==="WALK_IN"
               ? <div className="ad-note ad-note--purple" style={{marginTop:12}}>
                   🚶 Walk-in drive — no email links. Share the <strong>/test</strong> portal link; students self-register with the test code. Registration opens before the start time; the assessment begins at the start time.
@@ -1175,6 +1213,9 @@ function EditDriveModal({ drive, onClose, onSaved }) {
   const [date,setDate]=useState(_s?`${_s.getFullYear()}-${_p(_s.getMonth()+1)}-${_p(_s.getDate())}`:"");
   const [startTime,setStartTime]=useState(_s?`${_p(_s.getHours())}:${_p(_s.getMinutes())}`:"");
   const [endTime,setEndTime]=useState(_e?`${_p(_e.getHours())}:${_p(_e.getMinutes())}`:"");
+  // Read back from the stored endAt, so a multi-day window survives an edit
+  // instead of being silently collapsed onto the start date.
+  const [endDate,setEndDate]=useState(_e?`${_e.getFullYear()}-${_p(_e.getMonth()+1)}-${_p(_e.getDate())}`:"");
   const [err,setErr]=useState(""); const [saving,setSaving]=useState(false);
 
   const save=async()=>{
@@ -1182,9 +1223,9 @@ function EditDriveModal({ drive, onClose, onSaved }) {
     // Schedule (optional to change, but if provided it must be valid).
     let sched={};
     if(date && startTime && endTime){
-      const startAt=combineDateTime(date,startTime), endAt=combineDateTime(date,endTime);
+      const startAt=combineDateTime(date,startTime), endAt=combineDateTime(endDate||date,endTime);
       if(!startAt||!endAt){ setErr("Enter valid start and end times."); return; }
-      if(new Date(endAt)<=new Date(startAt)){ setErr("End time must be after start time."); return; }
+      if(new Date(endAt)<=new Date(startAt)){ setErr("The window must end after it starts. For a drive running past midnight, set an End Date too."); return; }
       sched={ assessmentDate:combineDateTime(date,"00:00"), startAt, endAt, deadline:endAt };
     } else if(date || startTime || endTime){
       setErr("To change the schedule, set the date, start time and end time."); return;
@@ -1250,14 +1291,21 @@ function EditDriveModal({ drive, onClose, onSaved }) {
 
           <section className="ad-card-section">
             <div className="ad-card-section-title">🗓️ Assessment Schedule</div>
-            <div className="ad-grid-3">
-              <div className="ad-field"><label className="ad-label">Assessment Date</label>
+            <div className="ad-grid-2">
+              <div className="ad-field"><label className="ad-label">Start Date</label>
                 <input type="date" className="ad-input" value={date} onChange={e=>{setDate(e.target.value);setErr("");}}/></div>
               <div className="ad-field"><label className="ad-label">Start Time</label>
                 <input type="time" className="ad-input" value={startTime} onChange={e=>{setStartTime(e.target.value);setErr("");}}/></div>
+            </div>
+            <div className="ad-grid-2" style={{marginTop:12}}>
+              <div className="ad-field"><label className="ad-label">End Date</label>
+                <input type="date" className="ad-input" value={endDate} min={date||undefined}
+                  onChange={e=>{setEndDate(e.target.value);setErr("");}}/>
+                <span className="ad-hint">Leave blank for a same-day drive.</span></div>
               <div className="ad-field"><label className="ad-label">End Time</label>
                 <input type="time" className="ad-input" value={endTime} onChange={e=>{setEndTime(e.target.value);setErr("");}}/></div>
             </div>
+            <WindowSummary date={date} startTime={startTime} endDate={endDate} endTime={endTime}/>
             <span className="ad-hint">Reschedule the drive here anytime after creation.</span>
           </section>
 
