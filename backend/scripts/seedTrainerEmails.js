@@ -67,13 +67,14 @@ const TEMPLATES = [
         Your screening assessment is ready and you can begin using the button below.
       </p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:18px 0;border-collapse:collapse;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;">
-        <tr><td style="padding:10px 14px;color:#6b7280;font-size:13px;">Assessment date</td>
-            <td style="padding:10px 14px;font-weight:700;text-align:right;">{{date}}</td></tr>
-        <tr><td style="padding:10px 14px;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Portal opens</td>
-            <td style="padding:10px 14px;font-weight:700;text-align:right;border-top:1px solid #eef2f7;">{{startTime}}</td></tr>
+        <tr><td style="padding:10px 14px;color:#6b7280;font-size:13px;">Portal opens</td>
+            <td style="padding:10px 14px;font-weight:700;text-align:right;">{{date}} at {{startTime}}</td></tr>
         <tr><td style="padding:10px 14px;color:#6b7280;font-size:13px;border-top:1px solid #eef2f7;">Portal closes</td>
-            <td style="padding:10px 14px;font-weight:700;text-align:right;border-top:1px solid #eef2f7;">{{endTime}}</td></tr>
+            <td style="padding:10px 14px;font-weight:700;text-align:right;border-top:1px solid #eef2f7;">{{endDate}} at {{endTime}}</td></tr>
       </table>
+      <p style="margin:0 0 14px;color:#6b7280;font-size:13px;">
+        You may begin any time inside that window. The test must be finished in one sitting once you start.
+      </p>
       <p style="text-align:center;margin:26px 0;">
         <a href="{{link}}" style="background:#4F46E5;color:#ffffff;padding:13px 34px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;">Start assessment</a>
       </p>
@@ -82,8 +83,7 @@ const TEMPLATES = [
         <span style="word-break:break-all;">{{link}}</span>
       </p>
       <p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-        Please use a laptop or desktop with a working webcam and a stable connection,
-        and finish the assessment in one sitting once you begin.
+        Please use a laptop or desktop with a working webcam and a stable connection.
       </p>`),
   },
   {

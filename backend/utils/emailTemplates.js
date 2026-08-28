@@ -23,8 +23,9 @@ const PLACEHOLDERS = [
   ["link",       "The assessment URL (only meaningful for the link email)"],
   ["driveName",  "Name of the drive"],
   ["roundName",  "Name of this round"],
-  ["date",       "Assessment date, e.g. 10 September 2026"],
+  ["date",       "Date the window opens, e.g. 10 September 2026"],
   ["startTime",  "Portal opening time"],
+  ["endDate",    "Date the window CLOSES — may differ from the opening date"],
   ["endTime",    "Portal closing time"],
   ["score",      "Candidate's score, where known"],
   ["brand",      "Your organisation name"],
@@ -108,6 +109,10 @@ function varsFor({ candidate = {}, assessment = {}, round = {}, link = "", brand
     roundName: round.name || "",
     date:      fmtDate(assessment.assessmentDate || assessment.startAt),
     startTime: fmtTime(assessment.startAt),
+    // Derived from endAt, NOT from the opening date. A window may now run past
+    // midnight or across days, and "closes 2:00 am" with no date attached tells
+    // a candidate nothing about which morning.
+    endDate:   fmtDate(assessment.endAt || assessment.deadline || assessment.assessmentDate),
     endTime:   fmtTime(assessment.endAt || assessment.deadline),
     score:     candidate.score != null ? String(candidate.score) : "",
     brand,
