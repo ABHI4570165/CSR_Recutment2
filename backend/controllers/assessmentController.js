@@ -841,7 +841,8 @@ exports.getCandidateAnswers = async (req, res) => {
           if (q.type === "text") { given = String(ans); correct = q.answerText != null && norm(ans) === norm(q.answerText); }
           else { const oi = (optionOrder[qid] || [])[ans]; given = oi != null && q.options ? (q.options[oi] ?? null) : null; correct = oi === q.correctIndex; }
         }
-        return { qid, section: q.section, given, correct: correctAns, isCorrect: correct, marks: correct ? (q.marks || 1) : 0 };
+        return { qid, section: q.section, given, correct: correctAns, isCorrect: correct,
+          marks: correct ? (q.marks || 1) : 0, maxMarks: q.marks || 1, evalStatus: "COMPLETED" };
       }).filter(Boolean);
     }
 
@@ -858,8 +859,23 @@ exports.getCandidateAnswers = async (req, res) => {
       text: qmap[s.qid]?.text || "(question was edited or removed)",
       type: qmap[s.qid]?.type || (s.correct && s.correct.length > 30 ? "text" : undefined),
       given: s.given, correct: s.correct, isCorrect: !!s.isCorrect, marks: s.marks || 0,
+      // What the question was WORTH, and how the mark was arrived at. Without the
+      // maximum, "2" on an answer script says nothing; without the status, an
+      // answer still awaiting a reader is indistinguishable from a wrong one.
+      maxMarks: s.maxMarks || 1,
+      evalStatus: s.evalStatus || "COMPLETED",
+      evalReason: s.evalReason || null,
+      matched: s.matched || undefined,
+      missing: s.missing || undefined,
+      confidence: s.confidence ?? null,
     }));
-    res.json({ success: true, data: { candidate: pickCand(c), answers } });
+    // Totals travel with the script so the file is self-contained — a reviewer
+    // reading it later should not have to look anything up elsewhere.
+    res.json({ success: true, data: { candidate: pickCand(c), answers,
+      totals: {
+        score: c.score ?? 0, totalMarks: c.totalMarks ?? answers.reduce((n, a) => n + a.maxMarks, 0),
+        pendingMarks: c.pendingMarks ?? 0, evaluationStatus: c.evaluationStatus || "COMPLETED",
+      } } });
   } catch (err) {
     console.error("getCandidateAnswers:", err);
     res.status(500).json({ success: false, message: "Server error." });

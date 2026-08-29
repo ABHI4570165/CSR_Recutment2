@@ -61,6 +61,59 @@ function sectionColor(sec, idx) {
 const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
 
+/*
+ * Download one candidate's answer script as a spreadsheet.
+ *
+ * One row per question carrying the question, what the candidate wrote, what was
+ * expected, the marks secured AND what the question was worth. The maximum
+ * matters: "2" alone says nothing without knowing whether it was out of 2 or 3.
+ *
+ * An answer still awaiting evaluation is labelled as such rather than shown as
+ * 0 — on a printed script those look identical, and one of them is wrong.
+ */
+function downloadAnswerScript(cand, data) {
+  const answers = data?.answers || [];
+  const t = data?.totals || {};
+  const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+
+  const rows = answers.map((a) => ({
+    "#": a.n,
+    Section: a.section || "",
+    Question: clean(a.text),
+    "Candidate Answer": a.given == null ? "(not answered)" : clean(a.given),
+    "Expected Answer / Rubric": clean(a.correct),
+    "Marks Secured": a.evalStatus && a.evalStatus !== "COMPLETED" ? "" : (a.marks ?? 0),
+    "Total Marks": a.maxMarks ?? 1,
+    Result: a.given == null ? "Not answered"
+      : a.evalStatus && a.evalStatus !== "COMPLETED" ? "Awaiting evaluation"
+      : a.isCorrect ? "Correct"
+      : (a.marks > 0 ? "Partial" : "Incorrect"),
+    "Evaluator Note": clean(a.evalReason),
+    Matched: (a.matched || []).join(", "),
+    Missing: (a.missing || []).join(", "),
+    Confidence: a.confidence ?? "",
+  }));
+
+  // A blank line, then the totals — so the numbers are on the sheet itself and a
+  // reviewer never has to trust a filename or go back to the dashboard.
+  rows.push({});
+  rows.push({
+    Question: "TOTAL",
+    "Marks Secured": t.score ?? answers.reduce((n, a) => n + (a.marks || 0), 0),
+    "Total Marks": t.totalMarks ?? answers.reduce((n, a) => n + (a.maxMarks || 1), 0),
+    Result: t.evaluationStatus === "COMPLETED" ? "Final"
+      : `Provisional — ${t.pendingMarks || 0} mark(s) not yet evaluated`,
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows, { skipHeader: false });
+  ws["!cols"] = [{ wch: 5 }, { wch: 12 }, { wch: 60 }, { wch: 50 }, { wch: 50 },
+                 { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 60 }, { wch: 28 }, { wch: 28 }, { wch: 11 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Answer Script");
+  const safe = String(cand?.name || "candidate").replace(/[^A-Za-z0-9]+/g, "_");
+  XLSX.writeFile(wb, `answer-script_${safe}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 /* ── AI evaluation queue banner ───────────────────────────────────────────────
  * Shown wherever an admin reads scores, because a paper mid-evaluation looks
  * exactly like a low score: the open answers sit at 0 until someone marks them.
@@ -2122,7 +2175,13 @@ function CandidateProfile({ candidate: c, onClose }) {
           )}
           {tab === "answers" && (
             <section className="ad-card-section">
-              <div className="ad-card-section-title">📝 Answer Sheet {ansData?.candidate?.assignedSet ? `· Set ${ansData.candidate.assignedSet}` : ""}</div>
+              <div className="ad-card-section-title" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <span>📝 Answer Sheet {ansData?.candidate?.assignedSet ? `· Set ${ansData.candidate.assignedSet}` : ""}</span>
+                {ansData?.answers?.length > 0 &&
+                  <button className="ad-btn ad-btn--sm ad-btn--export" onClick={()=>downloadAnswerScript(c, ansData)}>
+                    ⬇ Answer script
+                  </button>}
+              </div>
               {ansLoading ? <div className="ad-loading"><Spinner dark/>Loading answers…</div>
               : ansErr ? <p className="ad-form-err">{ansErr}</p>
               : !ansData || !ansData.answers?.length ? (
@@ -2131,8 +2190,13 @@ function CandidateProfile({ candidate: c, onClose }) {
                 <>
                   <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:12,fontSize:13}}>
                     <span>✅ Correct: <strong style={{color:"#059669"}}>{ansData.answers.filter(a=>a.isCorrect).length}</strong></span>
-                    <span>❌ Wrong: <strong style={{color:"#DC2626"}}>{ansData.answers.filter(a=>!a.isCorrect && a.given!=null).length}</strong></span>
+                    <span>❌ Wrong: <strong style={{color:"#DC2626"}}>{ansData.answers.filter(a=>!a.isCorrect && a.given!=null && a.evalStatus==="COMPLETED").length}</strong></span>
                     <span>⭕ Unanswered: <strong style={{color:"#64748B"}}>{ansData.answers.filter(a=>a.given==null).length}</strong></span>
+                    {ansData.answers.some(a=>a.evalStatus && a.evalStatus!=="COMPLETED") &&
+                      <span>⏳ Awaiting evaluation: <strong style={{color:"#B45309"}}>{ansData.answers.filter(a=>a.evalStatus && a.evalStatus!=="COMPLETED").length}</strong></span>}
+                    {ansData.totals &&
+                      <span>Total: <strong>{ansData.totals.score}/{ansData.totals.totalMarks}</strong>
+                        {ansData.totals.pendingMarks>0 && <span style={{color:"#B45309"}}> ({ansData.totals.pendingMarks} marks not yet marked)</span>}</span>}
                     {c.score!=null && <span>🎯 Score: <strong>{c.score}/{c.totalMarks}</strong></span>}
                   </div>
                   <div className="ad-table-wrap" style={{maxHeight:420,overflowY:"auto"}}>
