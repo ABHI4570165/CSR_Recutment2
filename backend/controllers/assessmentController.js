@@ -1353,7 +1353,21 @@ function scoreAttempt(qids, qmap, answers, optionOrder, sections) {
   let score = 0, totalMarks = 0, pendingMarks = 0;
   const sectionScores = {};
   (sections || []).forEach(s => { sectionScores[s.name] = 0; });
-  const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  /*
+   * Two comparisons, because one is not enough for typed output.
+   *
+   *   loose   collapses runs of whitespace — "[3  4  5]" == "[3 4 5]"
+   *   tight   removes whitespace entirely  — "[1,2,3,4]" == "[1, 2, 3, 4]"
+   *
+   * Only collapsing marked a candidate wrong for omitting the space after a
+   * comma, which is not a mistake about Python — it is a typing habit. The tight
+   * form is applied only to SHORT expected outputs, where whitespace carries no
+   * meaning; prose answers never reach this path.
+   */
+  const loose = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const tight = s => String(s ?? "").toLowerCase().replace(/\s+/g, "");
+  const matches = (given, expected) =>
+    loose(given) === loose(expected) || tight(given) === tight(expected);
   const answerSheet = [];
   (qids || []).forEach(qid => {
     const q = qmap[qid];
@@ -1369,7 +1383,7 @@ function scoreAttempt(qids, qmap, answers, optionOrder, sections) {
       given = answered ? String(ans) : null;
       // Exact match first: a crisp expected output ("[1, 2, 3, 4]", "False") is
       // graded here and for free. Only what it cannot settle goes to a reader.
-      const exact = answered && q.answerText != null && norm(ans) === norm(q.answerText);
+      const exact = answered && q.answerText != null && matches(ans, q.answerText);
       if (exact) { correct = true; marks = max; }
       else if (answered) { evalStatus = "PENDING"; pendingMarks += max; }
       // Unanswered stays COMPLETED at 0 — there is nothing for anyone to read.
