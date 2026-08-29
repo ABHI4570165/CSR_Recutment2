@@ -10,6 +10,7 @@ import {
   getSystemStatus, setActiveMode, sendHeartbeat, warmAllBackends, BACKEND_COUNT,
   fetchRoundSummary, fetchCandidateJourney, moveToTechnical, fetchQuestionCatalog
 } from "../utils/api";
+import { fetchEvalQueue, runEvaluation } from "../utils/workspaceApi";
 import "./AdminDashboard.css";
 // Multi-workspace recruitment module (additive — the legacy screens below are untouched).
 import WorkspaceModule, { WorkspaceProvider, WorkspaceSwitcherSlot, useWorkspace } from "./workspace/WorkspaceModule";
@@ -59,6 +60,56 @@ function sectionColor(sec, idx) {
 
 const Spinner = ({dark}) => <span className={dark?"ad-spin-dark":"ad-spin"}/>;
 
+
+/* ── AI evaluation queue banner ───────────────────────────────────────────────
+ * Shown wherever an admin reads scores, because a paper mid-evaluation looks
+ * exactly like a low score: the open answers sit at 0 until someone marks them.
+ * The button does NOT evaluate — the model runs on the admin's own machine and
+ * this server cannot reach it — so it says what to start instead of pretending.
+ */
+function EvalQueueBanner({ readOnly }) {
+  const [q, setQ] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    try { const r = await fetchEvalQueue(); setQ(r.data.data); } catch { setQ(null); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!q || (q.pending + q.processing + q.failed) === 0) return null;
+
+  const run = async () => {
+    setBusy(true); setNote("");
+    try {
+      const r = await runEvaluation({});
+      setNote(r.data.data.message);
+      await load();
+    } catch (e) {
+      setNote(e?.response?.data?.message || "Could not queue the evaluation. Please try again.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rp-eval">
+      <div className="rp-eval-main">
+        <strong>{q.answersWaiting} answer{q.answersWaiting === 1 ? "" : "s"} awaiting AI evaluation</strong>
+        <span> — worth {q.marksWaiting} mark{q.marksWaiting === 1 ? "" : "s"} across {q.pending + q.processing + q.failed} candidate(s).</span>
+        <div className="ad-hint" style={{ marginTop: 4 }}>
+          Those answers score 0 right now because nobody has marked them yet — not because they are wrong.
+          Start Ollama, run <code>npm run evaluation:worker</code> on your machine, then press Evaluate.
+          {q.failed > 0 && <> <strong>{q.failed} paper(s) previously failed and will be retried.</strong></>}
+        </div>
+        {note && <div className="ad-hint" style={{ marginTop: 6, color: "#15803d" }}>{note}</div>}
+      </div>
+      {!readOnly && (
+        <button className="ad-btn ad-btn--primary" disabled={busy} onClick={run}>
+          {busy ? <><Spinner />Queuing…</> : "Evaluate now"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /* ── Question Papers ──────────────────────────────────────────────────────────
  * A paper is a NAMED selection of question sets, stored in the database. The
@@ -2881,6 +2932,7 @@ function Dashboard({ onLogout }) {
 
         {tab==="attempts" && (
           <div>
+            <EvalQueueBanner readOnly={isViewer()}/>
             <div className="ad-section-head">
               <div className="ad-page-title">Quiz Attempts ({attPag.total||0})</div>
               <button className="ad-btn ad-btn--export" onClick={exportAttempts} disabled={exporting}>
