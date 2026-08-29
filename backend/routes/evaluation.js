@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const {
-  authEvaluator, leaseJobs, submitResults, health, reevaluate,
+  authEvaluator, leaseJobs, submitResults, health, reevaluate, runNow, queueStatus,
 } = require("../controllers/evaluationController");
 const { authAdmin, requireFullAdmin } = require("../middleware/auth");
 
@@ -18,6 +18,12 @@ router.get ("/health", (req, res, next) => {
   if (req.get("X-Evaluator-Key")) return authEvaluator(req, res, next);
   return authAdmin(req, res, next);
 }, health);
+
+// Admin-only. "Evaluate now" and the queue badge behind it. Neither evaluates:
+// the model runs on the admin's machine, which this server cannot reach. They
+// unblock the queue and report its depth so the button tells the truth.
+router.get ("/queue", authAdmin, queueStatus);
+router.post("/run",   authAdmin, requireFullAdmin, runNow);
 
 // Admin-only: put a candidate's AI-graded answers back in the queue.
 router.post("/reevaluate", authAdmin, requireFullAdmin, reevaluate);

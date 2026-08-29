@@ -1025,9 +1025,22 @@ function windowState(assessment) {
 async function buildPaper(assessment, set = null) {
   const sections = assessment.sections || [];
   const sectionNames = sections.map(s => s.name);
+  /*
+   * SCOPED TO THE DRIVE'S WORKSPACE.
+   *
+   * The same set name exists in more than one workspace — "T" is seeded in both
+   * Trainers Recutment and Inference Labs — and without this the query matched
+   * every copy. A Trainers drive was served a paper drawn from BOTH: half its
+   * questions came from the other company, carrying that company's marks, so a
+   * 100-mark paper came out as 73 and the same question could appear twice.
+   *
+   * Legacy drives have no workspaceId and must keep matching the unscoped pool,
+   * so the constraint is added only when the drive actually has one.
+   */
+  const scope = assessment.workspaceId ? { workspaceId: assessment.workspaceId } : {};
   const filter = (assessment.round === 2)
-    ? { round: 2, set, section: { $in: sectionNames } }   // one set per candidate
-    : { section: { $in: sectionNames } };                 // round 1: unchanged pool
+    ? { ...scope, round: 2, set, section: { $in: sectionNames } }   // one set per candidate
+    : { ...scope, section: { $in: sectionNames } };                 // round 1: unchanged pool
   const all = await Question.find(filter).lean();
 
   const bySection = {};

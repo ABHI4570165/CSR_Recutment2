@@ -6,6 +6,7 @@ import {
 import { Loading, ErrorNote, Empty, Modal, Confirm, Spinner, StatusBadge, useToast, Pagination, pretty } from "./ui";
 import { cutoffLabel, CUTOFF_METHODS, usesEngine } from "./RoundBuilder";
 import ManualSendDialog from "./ManualSendDialog";
+import { fetchEvalQueue, runEvaluation } from "../../utils/workspaceApi";
 
 /*
  * Round management: statistics, the candidate table, cutoff preview/apply and
@@ -26,6 +27,11 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
   // the list survives pagination and the dialog can show who it is mailing.
   const [picked, setPicked] = useState(() => new Map());
   const [sending, setSending] = useState(false);
+  // AI-evaluation queue. Open answers score 0 until a reader grades them, so the
+  // admin needs to see what is still unmarked rather than reading a partial
+  // total as final.
+  const [evalQ, setEvalQ] = useState(null);
+  const [evalBusy, setEvalBusy] = useState(false);
   const [qFilter, setQFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -56,6 +62,27 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
 
   useEffect(() => { loadDash(); }, [loadDash]);
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // Reloaded alongside the candidate list, so the count reflects what the table
+  // is showing rather than a stale snapshot.
+  const loadEvalQ = useCallback(async () => {
+    try { const r = await fetchEvalQueue(); setEvalQ(r.data.data); } catch { setEvalQ(null); }
+  }, []);
+  useEffect(() => { loadEvalQ(); }, [loadEvalQ, rows]);
+
+  const doEvaluate = async () => {
+    setEvalBusy(true);
+    try {
+      const r = await runEvaluation({});
+      const d = r.data.data;
+      showToast({ title: d.pendingAnswers ? "Evaluation queued" : "Nothing pending", lines: [d.message] });
+      await loadEvalQ();
+      refresh();
+    } catch (e) {
+      showToast({ type: "error", title: "Could not queue the evaluation",
+        lines: [e?.response?.data?.message || "Please try again."] });
+    } finally { setEvalBusy(false); }
+  };
 
   const refresh = () => { loadDash(); loadRows(); onChanged?.(); };
 
@@ -158,6 +185,29 @@ export default function RoundPanel({ round, driveId, onBack, onChanged, readOnly
           <option value="PENDING">Pending</option>
         </select>
       </div>
+
+      {/* Open answers score 0 until a reader grades them, so a paper mid-evaluation
+          must never be read as a finished score. The button does not evaluate —
+          the model runs on the admin's machine — it unblocks the queue and says
+          plainly what to start. */}
+      {evalQ && (evalQ.pending + evalQ.processing + evalQ.failed) > 0 && (
+        <div className="rp-eval">
+          <div className="rp-eval-main">
+            <strong>{evalQ.answersWaiting} answer{evalQ.answersWaiting === 1 ? "" : "s"} awaiting AI evaluation</strong>
+            <span> — worth {evalQ.marksWaiting} mark{evalQ.marksWaiting === 1 ? "" : "s"} across {evalQ.pending + evalQ.processing + evalQ.failed} candidate(s).</span>
+            <div className="ad-hint" style={{ marginTop: 4 }}>
+              These score 0 for now because nobody has marked them yet — not because they are wrong.
+              Start Ollama, run <code>npm run evaluation:worker</code> on your machine, then press Evaluate.
+              {evalQ.failed > 0 && <> <strong>{evalQ.failed} paper(s) previously failed and will be retried.</strong></>}
+            </div>
+          </div>
+          {!readOnly && (
+            <button className="ad-btn ad-btn--primary" disabled={evalBusy} onClick={doEvaluate}>
+              {evalBusy ? <><Spinner />Queuing…</> : "Evaluate now"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="ad-table-wrap">
         {loading && !rows.length ? <Loading />

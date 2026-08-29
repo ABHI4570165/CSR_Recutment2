@@ -263,3 +263,84 @@ exports.reevaluate = async (req, res) => {
 };
 
 exports.authEvaluator = authEvaluator;
+
+
+/*
+ * POST /api/evaluation/run   (admin)
+ *
+ * The "Evaluate now" button. It does NOT evaluate anything itself — the model
+ * runs on the admin's own machine, which this server cannot reach. What it does
+ * is make the queue visible and unblock anything stuck, so pressing it after
+ * starting Ollama gives an honest answer instead of appearing to do nothing:
+ *
+ *   - rows left PROCESSING by a worker that died are returned to PENDING
+ *   - rows parked FAILED are given a fresh set of attempts
+ *   - the resulting queue depth is reported back
+ *
+ * The local worker then picks them up on its next poll, within seconds.
+ */
+exports.runNow = async (req, res) => {
+  try {
+    const { legacyScope } = require("../utils/legacyScope");
+    const filter = { ...legacyScope(req), evaluationStatus: { $in: ["PENDING", "PROCESSING", "FAILED"] } };
+    if (req.body?.candidateId && mongoose.isValidObjectId(req.body.candidateId)) {
+      filter._id = new mongoose.Types.ObjectId(req.body.candidateId);
+      delete filter.evaluationStatus;             // a named candidate is requeued whatever its state
+    }
+    const cands = await Candidate.find(filter);
+
+    let requeued = 0, papers = 0, pendingAnswers = 0;
+    for (const c of cands) {
+      let touched = false;
+      for (const row of c.answerSheet || []) {
+        // A stale lease or an exhausted row is the only thing standing between a
+        // running worker and this answer.
+        if (row.evalStatus === "PROCESSING" || row.evalStatus === "FAILED") {
+          row.evalStatus = "PENDING";
+          row.evalAttempts = 0;
+          row.leasedAt = undefined;
+          row.evalError = null;
+          requeued++; touched = true;
+        }
+        if (row.evalStatus === "PENDING") pendingAnswers++;
+      }
+      if (touched) { Object.assign(c, _recomputeTotals(c)); await c.save(); papers++; }
+    }
+
+    res.json({ success: true, data: {
+      papers: cands.length, requeued, pendingAnswers,
+      message: pendingAnswers
+        ? `${pendingAnswers} answer(s) are queued. Start Ollama and run "npm run evaluation:worker" on your machine — it will pick them up within seconds.`
+        : "Nothing is waiting to be evaluated.",
+    } });
+  } catch (err) {
+    console.error("runNow error:", err);
+    res.status(500).json({ success: false, message: "Failed to queue the evaluation." });
+  }
+};
+
+// GET /api/evaluation/queue  (admin) — what is waiting, for the button's badge.
+exports.queueStatus = async (req, res) => {
+  try {
+    const { legacyScope } = require("../utils/legacyScope");
+    const scope = legacyScope(req);
+    const [pending, processing, failed] = await Promise.all([
+      Candidate.countDocuments({ ...scope, evaluationStatus: "PENDING" }),
+      Candidate.countDocuments({ ...scope, evaluationStatus: "PROCESSING" }),
+      Candidate.countDocuments({ ...scope, evaluationStatus: "FAILED" }),
+    ]);
+    const agg = await Candidate.aggregate([
+      { $match: { ...scope, evaluationStatus: { $in: ["PENDING", "PROCESSING", "FAILED"] } } },
+      { $unwind: "$answerSheet" },
+      { $match: { "answerSheet.evalStatus": { $in: ["PENDING", "PROCESSING", "FAILED"] } } },
+      { $group: { _id: null, answers: { $sum: 1 }, marks: { $sum: "$answerSheet.maxMarks" } } },
+    ]);
+    res.json({ success: true, data: {
+      pending, processing, failed,
+      answersWaiting: agg[0]?.answers || 0,
+      marksWaiting: agg[0]?.marks || 0,
+    } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Failed to read the evaluation queue." });
+  }
+};

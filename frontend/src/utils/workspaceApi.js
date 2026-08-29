@@ -181,3 +181,11 @@ export const fetchEmailWorkflow  = (roundId) => ws.get("/email-templates/workflo
 export const setEmailWorkflow    = (d)     => ws.put("/email-templates/workflow", d);
 export const clearEmailWorkflow  = (id)    => ws.delete(`/email-templates/workflow/${id}`);
 export const sendManualEmail     = (d)     => ws.post("/email-templates/send", d);
+
+/* ── AI evaluation queue ──────────────────────────────────────────────────────
+ * The model runs on the admin's own machine, so the server cannot evaluate on
+ * demand. `runEvaluation` unblocks the queue and reports its depth; the local
+ * worker does the actual grading on its next poll.
+ */
+export const fetchEvalQueue = ()  => ws.get("/evaluation/queue");
+export const runEvaluation  = (d) => ws.post("/evaluation/run", d || {});
