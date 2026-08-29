@@ -192,7 +192,8 @@ exports.registerWalkIn = async (req, res) => {
         // a workspace drive must belong to that workspace, or it never shows up.
         ...(drive.workspaceId ? { workspaceId: drive.workspaceId } : {}),
         ...(drive.driveId     ? { driveId: drive.driveId }         : {}),
-        ...(drive.roundId     ? { roundId: drive.roundId }         : {}),
+        // Same as the admin upload: without isPrimary the round cannot see them.
+        ...(drive.roundId     ? { roundId: drive.roundId, isPrimary: true, roundStatus: "NOT_STARTED" } : {}),
         assessmentId: drive._id,
         name, email, college,
         candidateSource: "WALK_IN",

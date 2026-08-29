@@ -286,13 +286,19 @@ candidateSchema.index({ round: 1, college: 1, status: 1 });
 candidateSchema.index({ round: 1, score: -1 });
 
 /* ── NEW ARCHITECTURE INDEXES ────────────────────────────────────────────────
- * ONE participation per (application, round). The partial filter means the
- * constraint applies ONLY to records written by the new flow (legacy records
- * carry no isPrimary field and are therefore excluded), and a legitimate re-sit
- * stored with isPrimary:false is never blocked.
+ * ONE participation per (application, round). A legitimate re-sit stored with
+ * isPrimary:false is never blocked, and legacy records carrying no isPrimary are
+ * excluded.
+ *
+ * applicationId MUST also exist for the constraint to apply. Candidates uploaded
+ * straight into a drive have no application, so every one of them keyed as
+ * (null, roundId) — meaning only ONE such candidate per round could be marked
+ * primary and the rest were rejected outright. The rule is "one attempt per
+ * application per round"; with no application there is nothing for it to
+ * constrain.
  */
 candidateSchema.index({ applicationId: 1, roundId: 1 },
-  { unique: true, partialFilterExpression: { isPrimary: true } });
+  { unique: true, partialFilterExpression: { isPrimary: true, applicationId: { $exists: true } } });
 candidateSchema.index({ roundId: 1, roundStatus: 1 });
 candidateSchema.index({ roundId: 1, qualification: 1 });
 candidateSchema.index({ roundId: 1, score: -1 });

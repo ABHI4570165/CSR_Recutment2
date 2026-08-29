@@ -304,7 +304,10 @@ exports.uploadCandidates = async (req, res) => {
         // public walk-in route too, which carries no admin header.
         ...(assessment.workspaceId ? { workspaceId: assessment.workspaceId } : {}),
         ...(assessment.driveId     ? { driveId: assessment.driveId }         : {}),
-        ...(assessment.roundId     ? { roundId: assessment.roundId }         : {}),
+        // isPrimary marks the attempt a round COUNTS. Every round-level query —
+        // the student list, cutoff preview, apply, advance — filters on it, so a
+        // roundId without it is a participation nothing can see.
+        ...(assessment.roundId     ? { roundId: assessment.roundId, isPrimary: true, roundStatus: "NOT_STARTED" } : {}),
         assessmentId, name, email, college, token,
         tokenExpiresAt: expiry || undefined,
         status: "invited",
